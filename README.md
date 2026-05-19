@@ -27,7 +27,17 @@ This project implements your thesis idea:
 
    `python -m venv .venv`
 
+   On macOS/Linux:
+
    `source .venv/bin/activate`
+
+   On Windows Git Bash:
+
+   `source .venv/Scripts/activate`
+
+   On Windows PowerShell:
+
+   `.\.venv\Scripts\Activate.ps1`
 
 2. Install the dependencies from the locked file:
 
