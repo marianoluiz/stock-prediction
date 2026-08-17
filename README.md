@@ -14,12 +14,18 @@ This project implements your thesis idea:
 
 ## Project Structure
 
-- [main.py](main.py)
-- [models/gru_model.py](models/gru_model.py)
-- [training/train.py](training/train.py)
-- [utils/preprocessing.py](utils/preprocessing.py)
-- [utils/trading.py](utils/trading.py)
-- [utils/metrics.py](utils/metrics.py)
+```
+├── main.py                 # CLI entry point, orchestrates everything
+├── models/gru_model.py     # GRU(input=1, hidden=64, layers=2) -> LayerNorm -> Linear
+├── training/train.py       # Training loop with profit-aware loss
+├── utils/
+│   ├── preprocessing.py    # Yahoo Finance download, returns calc, sliding windows
+│   ├── trading.py          # tanh-based trading signal, transaction costs, loss
+│   └── metrics.py          # Directional accuracy, cumulative profit, Sharpe ratio
+├── data/AAPL_prices.csv    # 2,105 days of AAPL data (2018-2026)
+├── results/                # Saved model + loss/profit curves
+└── requirements-*.txt      # pip-tools managed deps (Win + Linux)
+```
 
 ## Setup
 
@@ -46,6 +52,8 @@ This last step is usually done by the repository owner or maintainer.
 Example:
 
 `python main.py --symbol AAPL --start 2018-01-01 --sequence-length 30 --alpha 5 --transaction-cost 0.001 --epochs 50`
+
+`python main.py --symbol GOOGL --start 2018-01-01`
 
 Artifacts are saved in [results](results):
 

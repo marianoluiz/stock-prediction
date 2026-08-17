@@ -12,6 +12,13 @@ from utils.preprocessing import compute_returns, create_sequences, load_stock_da
 
 
 def plot_history(history: dict, output_dir: Path) -> None:
+    """Plot training loss and cumulative profit curves.
+
+    Args:
+        history: Dictionary containing 'train_loss', 'val_loss',
+            'train_profit', and 'val_profit' lists.
+        output_dir: Directory where the plots will be saved.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     plt.figure(figsize=(10, 4))
@@ -38,25 +45,34 @@ def plot_history(history: dict, output_dir: Path) -> None:
 
 
 def main() -> None:
+    """Train and evaluate a GRU model with profit-aware loss."""
     parser = argparse.ArgumentParser(description="Enhanced GRU with Profit-Aware Loss and Transaction Costs")
-    parser.add_argument("--symbol", type=str, default="AAPL")
-    parser.add_argument("--start", type=str, default="2018-01-01")
-    parser.add_argument("--end", type=str, default=None)
-    parser.add_argument("--sequence-length", type=int, default=30)
-    parser.add_argument("--hidden-size", type=int, default=64)
-    parser.add_argument("--num-layers", type=int, default=2)
-    parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--alpha", type=float, default=5.0)
-    parser.add_argument("--transaction-cost", type=float, default=0.001)
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-3)
+
+    #  Data 
+    parser.add_argument("--symbol", type=str, default="AAPL",              help="Stock ticker symbol (e.g. AAPL, MSFT)")
+    parser.add_argument("--start", type=str, default="2018-01-01",         help="Start date for historical data (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, default=None,                   help="End date for historical data (default: latest available)")
+    parser.add_argument("--sequence-length", type=int, default=30,         help="Number of past days used as input for each sample (lookback window)")
+
+    # Model Architecture
+    parser.add_argument("--hidden-size", type=int, default=64,             help="Number of hidden units in the GRU layers")
+    parser.add_argument("--num-layers", type=int, default=2,               help="Number of stacked GRU layers")
+    parser.add_argument("--dropout", type=float, default=0.2,              help="Dropout rate between GRU layers (regularization)")
+
+    # Trading / Loss
+    parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
+    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1% per trade)")
+
+    # Training
+    parser.add_argument("--epochs", type=int, default=50,                  help="Number of training epochs")
+    parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size")
+    parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    cache_path = Path("data") / f"{args.symbol}_prices.csv"
+    cache_path = Path("data") / f"{args.symbol}_{args.start}_{args.end or 'latest'}.csv"
 
     # Load Stock Data
     df = load_stock_data(args.symbol, args.start, args.end, str(cache_path))
@@ -66,6 +82,8 @@ def main() -> None:
     returns = compute_returns(df).values
 
     # Create Sequential Windows (This creates time-series samples)
+    # x: shape [N, sequence_length, 1] — N samples, each is a window of 30 returns (1 feature per day)
+    # y: shape [N] — N single return values
     x, y = create_sequences(returns, sequence_length=args.sequence_length)
 
     # Train / Validation / Test Split

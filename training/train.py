@@ -1,3 +1,10 @@
+"""Training pipeline for stock-price prediction with profit-aware loss.
+
+Provides helpers to run a single epoch (train or eval) and to train a model
+for a fixed number of epochs, tracking loss, cumulative profit, directional
+accuracy, and a Sharpe-like metric.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,7 +20,10 @@ from utils.trading import profit_aware_loss, trading_signal
 
 @dataclass
 class TrainingConfig:
-    alpha: float = 5.0
+    """Hyperparameters for the training loop."""
+
+
+    alpha: float = 1.0
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
     batch_size: int = 64
@@ -21,6 +31,7 @@ class TrainingConfig:
 
 
 def to_loader(x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) -> DataLoader:
+    """Wrap numpy arrays in a ``DataLoader`` for batched training or evaluation."""
     x_t = torch.from_numpy(x)
     y_t = torch.from_numpy(y)
     dataset = TensorDataset(x_t, y_t)
@@ -34,7 +45,21 @@ def run_epoch(
     alpha: float,
     transaction_cost_rate: float,
     device: torch.device,
-) -> Dict[str, float]:
+    ) -> Dict[str, float]:
+    """Run one training or evaluation epoch.
+
+    Args:
+        model:  Neural-network module.
+        loader: Batched input/target pairs.
+        optimizer: An optimizer when training, ``None`` during evaluation.
+        alpha:  Scaling factor for the trading signal.
+        transaction_cost_rate:  Fractional cost per trade.
+        device: Target device for tensors.
+
+    Returns:
+        Dictionary of aggregated metrics: ``loss``, ``directional_acc``,
+        ``cum_profit`` and ``sharpe_like``.
+    """
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
 
@@ -104,7 +129,14 @@ def fit(
     val_loader: DataLoader,
     config: TrainingConfig,
     device: torch.device,
-) -> Dict[str, list]:
+    ) -> Dict[str, list]:
+    """Train *model* for a fixed number of epochs and return training history.
+
+    Uses Adam optimiser and the profit-aware loss defined in
+    ``utils.trading``.  Returns a dict whose keys are metric names
+    (e.g. ``train_loss``, ``val_profit``) and whose values are per-epoch
+    lists.
+    """
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     history: Dict[str, list] = {
         "train_loss": [],

@@ -11,6 +11,7 @@ import yfinance as yf
 
 @dataclass
 class SplitData:
+    """Container for train/validation/test numpy array splits."""
     x_train: np.ndarray
     y_train: np.ndarray
     x_val: np.ndarray
@@ -46,6 +47,25 @@ def _normalize_price_frame(df: pd.DataFrame, symbol: str | None = None) -> pd.Da
 
 
 def load_stock_data(symbol: str, start: str, end: str | None = None, cache_path: str | None = None) -> pd.DataFrame:
+    """Load stock OHLCV data from Yahoo Finance with local CSV caching.
+
+    Downloads the data via yfinance if no cache exists, otherwise reads from
+    the CSV file at ``cache_path``.  The result is always normalized to a flat
+    numeric DataFrame indexed by ``Date``.
+
+    Args:
+        symbol:   Ticker symbol (e.g. ``"AAPL"``).
+        start:    Start date string (``"YYYY-MM-DD"``).
+        end:      End date string, or ``None`` for the latest available data.
+        cache_path: File path for the CSV cache.  If ``None`` no caching is
+                    performed.
+
+    Returns:
+        A clean OHLCV DataFrame indexed by ``pd.DatetimeIndex``.
+
+    Raises:
+        ValueError: If yfinance returns an empty DataFrame.
+    """
     if cache_path and Path(cache_path).exists():
         cached = pd.read_csv(cache_path, parse_dates=["Date"])
         return _normalize_price_frame(cached, symbol=symbol)
@@ -64,12 +84,36 @@ def load_stock_data(symbol: str, start: str, end: str | None = None, cache_path:
 
 
 def compute_returns(df: pd.DataFrame, price_col: str = "Close") -> pd.Series:
+    """Compute simple percentage returns from a price series.
+
+    Calculates r_t = (P_{t+1} - P_t) / P_t using ``pct_change``.
+
+    Args:
+        df:        DataFrame containing at least one price column.
+        price_col: Name of the column to use (default ``"Close"``).
+
+    Returns:
+        A ``pd.Series`` of percentage returns with the first row (NaN) dropped.
+    """
     returns = df[price_col].pct_change().dropna()
     returns.name = "return"
     return returns
 
 
 def create_sequences(returns: np.ndarray, sequence_length: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Create sliding-window samples from a 1-D returns array.
+
+    For each index ``i`` the input window ``returns[i : i + sequence_length]``
+    becomes one sample and the target is ``returns[i + sequence_length]``.
+
+    Args:
+        returns:         1-D array of daily percentage returns.
+        sequence_length: Number of past days per sample (lookback window).
+
+    Returns:
+        ``(x, y)`` where ``x`` has shape ``[N, sequence_length, 1]`` and
+        ``y`` has shape ``[N]``.
+    """
     x, y = [], []
     for i in range(len(returns) - sequence_length):
         x.append(returns[i : i + sequence_length])
@@ -86,6 +130,21 @@ def train_val_test_split(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15, 
 ) -> SplitData:
+    """Chronologically split features and targets into train/val/test sets.
+
+    The split is strictly sequential (no shuffling) to preserve the temporal
+    ordering of the time-series data.
+
+    Args:
+        x:            Feature array of shape ``[N, ...]``.
+        y:            Target array of shape ``[N]``.
+        train_ratio:  Fraction of data used for training (default 0.7).
+        val_ratio:    Fraction of data used for validation (default 0.15).
+                      The remaining portion is used for testing.
+
+    Returns:
+        A :class:`SplitData` dataclass containing the six arrays.
+    """
     n = len(x)
     train_end = int(n * train_ratio)
     val_end = int(n * (train_ratio + val_ratio))
