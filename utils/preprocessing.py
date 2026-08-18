@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Tuple
 
@@ -18,6 +18,9 @@ class SplitData:
     y_val: np.ndarray
     x_test: np.ndarray
     y_test: np.ndarray
+    dates_train: np.ndarray = field(default_factory=lambda: np.array([]))
+    dates_val: np.ndarray = field(default_factory=lambda: np.array([]))
+    dates_test: np.ndarray = field(default_factory=lambda: np.array([]))
 
 
 def _normalize_price_frame(df: pd.DataFrame, symbol: str | None = None) -> pd.DataFrame:
@@ -70,10 +73,11 @@ def load_stock_data(symbol: str, start: str, end: str | None = None, cache_path:
         cached = pd.read_csv(cache_path, parse_dates=["Date"])
         return _normalize_price_frame(cached, symbol=symbol)
 
-    df = yf.download(symbol, start=start, end=end, auto_adjust=True, progress=False)
+    df = yf.download(symbol, start=start, end=end, progress=False)
+
     if df.empty:
         raise ValueError(f"No data downloaded for symbol={symbol}")
-
+    
     df = _normalize_price_frame(df, symbol=symbol)
 
     if cache_path:
@@ -100,7 +104,7 @@ def compute_returns(df: pd.DataFrame, price_col: str = "Close") -> pd.Series:
     return returns
 
 
-def create_sequences(returns: np.ndarray, sequence_length: int) -> Tuple[np.ndarray, np.ndarray]:
+def create_sequences(returns: np.ndarray, sequence_length: int, dates: np.ndarray | None = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Create sliding-window samples from a 1-D returns array.
 
     For each index ``i`` the input window ``returns[i : i + sequence_length]``
@@ -109,26 +113,32 @@ def create_sequences(returns: np.ndarray, sequence_length: int) -> Tuple[np.ndar
     Args:
         returns:         1-D array of daily percentage returns.
         sequence_length: Number of past days per sample (lookback window).
+        dates:           Optional array of dates aligned with ``returns``.
 
     Returns:
-        ``(x, y)`` where ``x`` has shape ``[N, sequence_length, 1]`` and
-        ``y`` has shape ``[N]``.
+        ``(x, y, dates_out)`` where ``x`` has shape ``[N, sequence_length, 1]``,
+        ``y`` has shape ``[N]``, and ``dates_out`` has shape ``[N]`` (or ``None``
+        if no dates were provided).
     """
-    x, y = [], []
+    x, y, d = [], [], []
     for i in range(len(returns) - sequence_length):
         x.append(returns[i : i + sequence_length])
         y.append(returns[i + sequence_length])
+        if dates is not None:
+            d.append(dates[i + sequence_length])
 
     x_arr = np.asarray(x, dtype=np.float32)[..., np.newaxis]  # [N, seq_len, 1]
     y_arr = np.asarray(y, dtype=np.float32)  # [N]
-    return x_arr, y_arr
+    d_arr = np.asarray(d) if dates is not None else None
+    return x_arr, y_arr, d_arr
 
 
 def train_val_test_split(
     x: np.ndarray,
     y: np.ndarray,
     train_ratio: float = 0.7,
-    val_ratio: float = 0.15, 
+    val_ratio: float = 0.15,
+    dates: np.ndarray | None = None,
 ) -> SplitData:
     """Chronologically split features and targets into train/val/test sets.
 
@@ -141,9 +151,11 @@ def train_val_test_split(
         train_ratio:  Fraction of data used for training (default 0.7).
         val_ratio:    Fraction of data used for validation (default 0.15).
                       The remaining portion is used for testing.
+        dates:        Optional array of dates aligned with ``x`` and ``y``.
 
     Returns:
-        A :class:`SplitData` dataclass containing the six arrays.
+        A :class:`SplitData` dataclass containing the six arrays (and date arrays
+        if dates were provided).
     """
     n = len(x)
     train_end = int(n * train_ratio)
@@ -156,4 +168,7 @@ def train_val_test_split(
         y_val=y[train_end:val_end],
         x_test=x[val_end:],
         y_test=y[val_end:],
+        dates_train=dates[:train_end] if dates is not None else np.array([]),
+        dates_val=dates[train_end:val_end] if dates is not None else np.array([]),
+        dates_test=dates[val_end:] if dates is not None else np.array([]),
     )

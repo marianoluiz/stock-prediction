@@ -1,4 +1,4 @@
-from __future__ import annotations # Enables forward references in type hints
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -8,23 +8,17 @@ import torch
 
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch, to_loader
-from utils.preprocessing import compute_returns, create_sequences, load_stock_data, train_val_test_split
+from utils.preprocessing import SplitData, compute_returns, create_sequences, load_stock_data, train_val_test_split
 
 
-def plot_history(history: dict, output_dir: Path) -> None:
-    """Plot training loss and cumulative profit curves.
-
-    Args:
-        history: Dictionary containing 'train_loss', 'val_loss',
-            'train_profit', and 'val_profit' lists.
-        output_dir: Directory where the plots will be saved.
-    """
+def plot_history(history: dict, output_dir: Path, capital: float = 1.0, title: str = "Loss") -> None:
+    """Plot training loss and cumulative profit curves."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     plt.figure(figsize=(10, 4))
     plt.plot(history["train_loss"], label="Train Loss")
     plt.plot(history["val_loss"], label="Val Loss")
-    plt.title("Profit-Aware Loss with Transaction Costs")
+    plt.title(title)
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
@@ -33,22 +27,82 @@ def plot_history(history: dict, output_dir: Path) -> None:
     plt.close()
 
     plt.figure(figsize=(10, 4))
-    plt.plot(history["train_profit"], label="Train Cumulative Profit")
-    plt.plot(history["val_profit"], label="Val Cumulative Profit")
-    plt.title("Cumulative Profit per Epoch")
+    plt.plot([p * capital for p in history["train_profit"]], label="Train Cumulative Profit")
+    plt.plot([p * capital for p in history["val_profit"]], label="Val Cumulative Profit")
+    plt.title(f"Cumulative Profit per Epoch (Capital: {capital:,.0f} PHP)")
     plt.xlabel("Epoch")
-    plt.ylabel("Profit")
+    plt.ylabel("Profit (PHP)")
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_dir / "profit_curve.png", dpi=200)
     plt.close()
 
 
+def run_single(
+    loss_type: str,
+    args: argparse.Namespace,
+    split: SplitData,
+    train_loader,
+    val_loader,
+    test_loader,
+    device: torch.device,
+) -> tuple[dict, dict]:
+    """Train one model with the given loss type and return (history, test_metrics)."""
+    model = GRUReturnPredictor(
+        input_size=1,
+        hidden_size=args.hidden_size,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+    ).to(device)
+
+    config = TrainingConfig(
+        loss_type=loss_type,
+        alpha=args.alpha,
+        transaction_cost_rate=args.transaction_cost,
+        learning_rate=args.lr,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+    )
+
+    label = loss_type.upper().replace("-", " ")
+    print(f"\n{'='*60}")
+    print(f"  Training: {label} loss")
+    print(f"{'='*60}\n")
+
+    history = fit(model, train_loader, val_loader, config, device, capital=args.capital)
+
+    test_metrics = run_epoch(
+        model,
+        test_loader,
+        None,
+        args.alpha,
+        args.transaction_cost,
+        device,
+        loss_type=loss_type,
+    )
+
+    print(f"\nTest Metrics [{label}] ({split.dates_test[0]} -> {split.dates_test[-1]})")
+    print(f"  Loss:                {test_metrics['loss']:.6f}")
+    print(f"  MSE:                 {test_metrics['mse']:.8f}")
+    print(f"  MAE:                 {test_metrics['mae']:.8f}")
+    print(f"  RMSE:                {test_metrics['rmse']:.8f}")
+    print(f"  Directional Acc:     {test_metrics['directional_acc']:.4f}")
+    print(f"  Cumulative Return:   {test_metrics['cum_profit']:.6f} ({test_metrics['cum_profit'] * args.capital:+,.2f} PHP)")
+    print(f"  Sharpe-like Ratio:   {test_metrics['sharpe_like']:.4f}")
+
+    results_dir = Path("results") / loss_type.replace("-", "_")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), results_dir / f"gru_{loss_type.replace('-', '_')}.pt")
+    plot_history(history, results_dir, capital=args.capital, title=f"{label} Loss")
+
+    return history, test_metrics
+
+
 def main() -> None:
     """Train and evaluate a GRU model with profit-aware loss."""
     parser = argparse.ArgumentParser(description="Enhanced GRU with Profit-Aware Loss and Transaction Costs")
 
-    #  Data 
+    #  Data
     parser.add_argument("--symbol", type=str, default="AAPL",              help="Stock ticker symbol (e.g. AAPL, MSFT)")
     parser.add_argument("--start", type=str, default="2018-01-01",         help="Start date for historical data (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default=None,                   help="End date for historical data (default: latest available)")
@@ -60,8 +114,12 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.2,              help="Dropout rate between GRU layers (regularization)")
 
     # Trading / Loss
+    parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
+                        help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
+    parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
     parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1% per trade)")
+    parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display (default: 100,000)")
 
     # Training
     parser.add_argument("--epochs", type=int, default=50,                  help="Number of training epochs")
@@ -78,60 +136,45 @@ def main() -> None:
     df = load_stock_data(args.symbol, args.start, args.end, str(cache_path))
 
     # Convert Prices into Returns
-    # return_t = \frac{P_{t+1} - P_t}{P_t}
-    returns = compute_returns(df).values
+    returns = compute_returns(df)
 
-    # Create Sequential Windows (This creates time-series samples)
-    # x: shape [N, sequence_length, 1] — N samples, each is a window of 30 returns (1 feature per day)
-    # y: shape [N] — N single return values
-    x, y = create_sequences(returns, sequence_length=args.sequence_length)
+    # Create Sequential Windows
+    dates = returns.index.to_numpy()
+    x, y, seq_dates = create_sequences(returns.values, sequence_length=args.sequence_length, dates=dates)
 
     # Train / Validation / Test Split
-    split = train_val_test_split(x, y)
+    split = train_val_test_split(x, y, dates=seq_dates)
+
+    print(f"Train: {len(split.x_train)} samples ({split.dates_train[0]} -> {split.dates_train[-1]})")
+    print(f"Val:   {len(split.x_val)} samples ({split.dates_val[0]} -> {split.dates_val[-1]})")
+    print(f"Test:  {len(split.x_test)} samples ({split.dates_test[0]} -> {split.dates_test[-1]})")
 
     # DataLoader
     train_loader = to_loader(split.x_train, split.y_train, args.batch_size, shuffle=False)
     val_loader = to_loader(split.x_val, split.y_val, args.batch_size, shuffle=False)
     test_loader = to_loader(split.x_test, split.y_test, args.batch_size, shuffle=False)
 
-    # GRU Model
-    model = GRUReturnPredictor(
-        input_size=1,
-        hidden_size=args.hidden_size,
-        num_layers=args.num_layers,
-        dropout=args.dropout,
-    ).to(device)
+    if args.compare:
+        _, mse_test = run_single("mse", args, split, train_loader, val_loader, test_loader, device)
+        _, pa_test = run_single("profit-aware", args, split, train_loader, val_loader, test_loader, device)
 
-    config = TrainingConfig(
-        alpha=args.alpha,
-        transaction_cost_rate=args.transaction_cost,
-        learning_rate=args.lr,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-    )
-
-    history = fit(model, train_loader, val_loader, config, device)
-
-    # run model
-    test_metrics = run_epoch(
-        model,
-        test_loader,
-        optimizer=None,
-        alpha=args.alpha,
-        transaction_cost_rate=args.transaction_cost,
-        device=device,
-    )
-
-    print("\nTest Metrics")
-    print(f"Loss: {test_metrics['loss']:.6f}")
-    print(f"Directional Accuracy: {test_metrics['directional_acc']:.4f}")
-    print(f"Cumulative Profit: {test_metrics['cum_profit']:.6f}")
-    print(f"Sharpe-like Ratio: {test_metrics['sharpe_like']:.4f}")
-
-    results_dir = Path("results")
-    results_dir.mkdir(exist_ok=True)
-    torch.save(model.state_dict(), results_dir / "gru_profit_aware.pt")
-    plot_history(history, results_dir)
+        print(f"\n{'='*60}")
+        print("  COMPARISON TABLE")
+        print(f"{'='*60}")
+        print(f"  {'Metric':<25} {'MSE Baseline':>15} {'Profit-Aware':>15}")
+        print(f"  {'-'*55}")
+        print(f"  {'Test Loss':<25} {mse_test['loss']:>15.6f} {pa_test['loss']:>15.6f}")
+        print(f"  {'MSE':<25} {mse_test['mse']:>15.8f} {pa_test['mse']:>15.8f}")
+        print(f"  {'MAE':<25} {mse_test['mae']:>15.8f} {pa_test['mae']:>15.8f}")
+        print(f"  {'RMSE':<25} {mse_test['rmse']:>15.8f} {pa_test['rmse']:>15.8f}")
+        print(f"  {'Directional Accuracy':<25} {mse_test['directional_acc']:>15.4f} {pa_test['directional_acc']:>15.4f}")
+        print(f"  {'Cumulative Return':<25} {mse_test['cum_profit']:>15.6f} {pa_test['cum_profit']:>15.6f}")
+        print(f"  {'  (in PHP)':<25} {mse_test['cum_profit'] * args.capital:>+14,.0f} {pa_test['cum_profit'] * args.capital:>+14,.0f}")
+        print(f"  {'Sharpe-like Ratio':<25} {mse_test['sharpe_like']:>15.4f} {pa_test['sharpe_like']:>15.4f}")
+        print(f"  {'-'*55}")
+        print()
+    else:
+        run_single(args.loss, args, split, train_loader, val_loader, test_loader, device)
 
 
 if __name__ == "__main__":

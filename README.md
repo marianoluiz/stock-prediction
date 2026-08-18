@@ -53,10 +53,14 @@ Example:
 
 `python main.py --symbol AAPL --start 2018-01-01 --sequence-length 30 --alpha 5 --transaction-cost 0.001 --epochs 50`
 
-`python main.py --symbol GOOGL --start 2018-01-01`
+`python main.py --symbol GOOGL --start 2018-01-01 --capital 50000`
+
+### Compare MSE vs Profit-Aware
+
+`python main.py --compare --epochs 50`
 
 Artifacts are saved in [results](results):
 
-- trained model (`gru_profit_aware.pt`)
+- trained model (`gru_profit_aware.pt` or `gru_mse.pt`)
 - loss curve (`loss_curve.png`)
 - profit curve (`profit_curve.png`)

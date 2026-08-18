@@ -31,14 +31,26 @@ All arguments are optional and have sensible defaults.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--alpha` | `float` | `5.0` | Weight of the profit-aware component in the loss function. Higher values emphasize profit optimization over pure MSE. |
+| `--loss` | `str` | `profit-aware` | Loss function: `mse` (baseline) or `profit-aware` (custom). |
+| `--compare` | flag | `False` | Run both loss functions and print a side-by-side comparison table. |
+| `--alpha` | `float` | `1.0` | Sharpness of tanh signal: higher = more aggressive binary-like positioning. |
 | `--transaction-cost` | `float` | `0.001` | Simulated trading cost per trade as a rate (0.001 = 0.1%). |
+| `--capital` | `float` | `100000.0` | Starting capital in PHP for simulated trading display. Converts percentage returns to PHP amounts in output. |
 
 ## Usage Examples
 
 ```bash
-# Default (AAPL)
+# Default (AAPL with profit-aware loss)
 python main.py
+
+# Run MSE baseline only
+python main.py --loss mse
+
+# Run profit-aware only (default)
+python main.py --loss profit-aware
+
+# Run both and print comparison table
+python main.py --compare --symbol AAPL --epochs 50
 
 # Different stock
 python main.py --symbol MSFT --start 2015-01-01

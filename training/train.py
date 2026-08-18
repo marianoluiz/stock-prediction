@@ -12,9 +12,17 @@ from typing import Dict, List
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-from utils.metrics import cumulative_profit, directional_accuracy, sharpe_like
+from utils.metrics import (
+    cumulative_profit,
+    directional_accuracy,
+    mean_absolute_error,
+    mean_squared_error,
+    root_mean_squared_error,
+    sharpe_like,
+)
 from utils.trading import profit_aware_loss, trading_signal
 
 
@@ -22,7 +30,7 @@ from utils.trading import profit_aware_loss, trading_signal
 class TrainingConfig:
     """Hyperparameters for the training loop."""
 
-
+    loss_type: str = "profit-aware"
     alpha: float = 1.0
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
@@ -45,6 +53,7 @@ def run_epoch(
     alpha: float,
     transaction_cost_rate: float,
     device: torch.device,
+    loss_type: str = "profit-aware",
     ) -> Dict[str, float]:
     """Run one training or evaluation epoch.
 
@@ -55,10 +64,11 @@ def run_epoch(
         alpha:  Scaling factor for the trading signal.
         transaction_cost_rate:  Fractional cost per trade.
         device: Target device for tensors.
+        loss_type: ``"mse"`` for baseline or ``"profit-aware"`` for custom loss.
 
     Returns:
         Dictionary of aggregated metrics: ``loss``, ``directional_acc``,
-        ``cum_profit`` and ``sharpe_like``.
+        ``cum_profit``, ``sharpe_like``, ``mse``, ``mae`` and ``rmse``.
     """
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
@@ -76,13 +86,16 @@ def run_epoch(
             y_batch = y_batch.to(device)
 
             pred = model(x_batch)
-            loss = profit_aware_loss(
-                pred,
-                y_batch,
-                alpha,
-                transaction_cost_rate=transaction_cost_rate,
-                previous_signal=previous_signal,
-            )
+            if loss_type == "mse":
+                loss = F.mse_loss(pred, y_batch)
+            else:
+                loss = profit_aware_loss(
+                    pred,
+                    y_batch,
+                    alpha,
+                    transaction_cost_rate=transaction_cost_rate,
+                    previous_signal=previous_signal,
+                )
 
             if is_train:
                 optimizer.zero_grad()
@@ -120,6 +133,9 @@ def run_epoch(
         "directional_acc": directional_accuracy(pred_np, actual_np),
         "cum_profit": cumulative_profit(signal_np, actual_np, transaction_cost_rate=transaction_cost_rate),
         "sharpe_like": sharpe_like(profit_np),
+        "mse": mean_squared_error(pred_np, actual_np),
+        "mae": mean_absolute_error(pred_np, actual_np),
+        "rmse": root_mean_squared_error(pred_np, actual_np),
     }
 
 
@@ -129,6 +145,7 @@ def fit(
     val_loader: DataLoader,
     config: TrainingConfig,
     device: torch.device,
+    capital: float = 1.0,
     ) -> Dict[str, list]:
     """Train *model* for a fixed number of epochs and return training history.
 
@@ -155,6 +172,7 @@ def fit(
             config.alpha,
             config.transaction_cost_rate,
             device,
+            loss_type=config.loss_type,
         )
         val_metrics = run_epoch(
             model,
@@ -163,6 +181,7 @@ def fit(
             config.alpha,
             config.transaction_cost_rate,
             device,
+            loss_type=config.loss_type,
         )
 
         history["train_loss"].append(train_metrics["loss"])
@@ -172,10 +191,15 @@ def fit(
         history["train_dir_acc"].append(train_metrics["directional_acc"])
         history["val_dir_acc"].append(val_metrics["directional_acc"])
 
+        train_profit_php = train_metrics["cum_profit"] * capital
+        val_profit_php = val_metrics["cum_profit"] * capital
+
+        tag = f"[{config.loss_type.upper()}] " if config.loss_type != "profit-aware" else ""
         print(
             f"Epoch {epoch:03d}/{config.epochs} | "
-            f"train_loss={train_metrics['loss']:.6f} val_loss={val_metrics['loss']:.6f} | "
-            f"train_profit={train_metrics['cum_profit']:.6f} val_profit={val_metrics['cum_profit']:.6f}"
+            f"{tag}train_loss={train_metrics['loss']:.6f} val_loss={val_metrics['loss']:.6f} | "
+            f"train_profit={train_metrics['cum_profit']:.6f} ({train_profit_php:+,.0f} PHP) "
+            f"val_profit={val_metrics['cum_profit']:.6f} ({val_profit_php:+,.0f} PHP)"
         )
 
     return history
