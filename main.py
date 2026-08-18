@@ -8,6 +8,7 @@ import torch
 
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch, to_loader
+from utils.metrics import trade_log
 from utils.preprocessing import SplitData, compute_returns, create_sequences, load_stock_data, train_val_test_split
 
 
@@ -29,6 +30,8 @@ def plot_history(history: dict, output_dir: Path, capital: float = 1.0, title: s
     plt.figure(figsize=(10, 4))
     plt.plot([p * capital for p in history["train_profit"]], label="Train Cumulative Profit")
     plt.plot([p * capital for p in history["val_profit"]], label="Val Cumulative Profit")
+    plt.plot([p * capital for p in history["train_profit_geo"]], label="Train Geometric Profit", linestyle="--")
+    plt.plot([p * capital for p in history["val_profit_geo"]], label="Val Geometric Profit", linestyle="--")
     plt.title(f"Cumulative Profit per Epoch (Capital: {capital:,.0f} PHP)")
     plt.xlabel("Epoch")
     plt.ylabel("Profit (PHP)")
@@ -46,6 +49,7 @@ def run_single(
     val_loader,
     test_loader,
     device: torch.device,
+    show_trade_log: bool = False,
 ) -> tuple[dict, dict]:
     """Train one model with the given loss type and return (history, test_metrics)."""
     model = GRUReturnPredictor(
@@ -88,7 +92,21 @@ def run_single(
     print(f"  RMSE:                {test_metrics['rmse']:.8f}")
     print(f"  Directional Acc:     {test_metrics['directional_acc']:.4f}")
     print(f"  Cumulative Return:   {test_metrics['cum_profit']:.6f} ({test_metrics['cum_profit'] * args.capital:+,.2f} PHP)")
+    print(f"  Geometric Return:    {test_metrics['cum_profit_geo']:.6f} ({test_metrics['cum_profit_geo'] * args.capital:+,.2f} PHP)")
     print(f"  Sharpe-like Ratio:   {test_metrics['sharpe_like']:.4f}")
+
+    if show_trade_log:
+        print(f"\n{'='*60}")
+        print(f"  TRADE LOG [{label}]")
+        print(f"{'='*60}")
+        trade_log(
+            test_metrics["signal_np"],
+            test_metrics["actual_np"],
+            test_metrics["pred_np"],
+            split.dates_test,
+            args.capital,
+            transaction_cost_rate=args.transaction_cost,
+        )
 
     results_dir = Path("results") / loss_type.replace("-", "_")
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +135,7 @@ def main() -> None:
     parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
                         help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
     parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
+    parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
     parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display (default: 100,000)")
@@ -155,8 +174,8 @@ def main() -> None:
     test_loader = to_loader(split.x_test, split.y_test, args.batch_size, shuffle=False)
 
     if args.compare:
-        _, mse_test = run_single("mse", args, split, train_loader, val_loader, test_loader, device)
-        _, pa_test = run_single("profit-aware", args, split, train_loader, val_loader, test_loader, device)
+        _, mse_test = run_single("mse", args, split, train_loader, val_loader, test_loader, device, show_trade_log=args.trade_log)
+        _, pa_test = run_single("profit-aware", args, split, train_loader, val_loader, test_loader, device, show_trade_log=args.trade_log)
 
         print(f"\n{'='*60}")
         print("  COMPARISON TABLE")
@@ -170,11 +189,13 @@ def main() -> None:
         print(f"  {'Directional Accuracy':<25} {mse_test['directional_acc']:>15.4f} {pa_test['directional_acc']:>15.4f}")
         print(f"  {'Cumulative Return':<25} {mse_test['cum_profit']:>15.6f} {pa_test['cum_profit']:>15.6f}")
         print(f"  {'  (in PHP)':<25} {mse_test['cum_profit'] * args.capital:>+14,.0f} {pa_test['cum_profit'] * args.capital:>+14,.0f}")
+        print(f"  {'Geometric Return':<25} {mse_test['cum_profit_geo']:>15.6f} {pa_test['cum_profit_geo']:>15.6f}")
+        print(f"  {'  (in PHP)':<25} {mse_test['cum_profit_geo'] * args.capital:>+14,.0f} {pa_test['cum_profit_geo'] * args.capital:>+14,.0f}")
         print(f"  {'Sharpe-like Ratio':<25} {mse_test['sharpe_like']:>15.4f} {pa_test['sharpe_like']:>15.4f}")
         print(f"  {'-'*55}")
         print()
     else:
-        run_single(args.loss, args, split, train_loader, val_loader, test_loader, device)
+        run_single(args.loss, args, split, train_loader, val_loader, test_loader, device, show_trade_log=args.trade_log)
 
 
 if __name__ == "__main__":

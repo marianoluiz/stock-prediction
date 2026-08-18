@@ -37,6 +37,16 @@ All arguments are optional and have sensible defaults.
 | `--transaction-cost` | `float` | `0.001` | Simulated trading cost per trade as a rate (0.001 = 0.1%). |
 | `--capital` | `float` | `100000.0` | Starting capital in PHP for simulated trading display. Converts percentage returns to PHP amounts in output. |
 
+## Signal Conversion (Evaluation)
+
+During evaluation, predicted returns are converted to trading signals using **thresholding**:
+
+- `pred > 0` → signal = `1.0` (full long position)
+- `pred < 0` → signal = `-1.0` (full short position)
+- `pred = 0` → signal = `0` (no position)
+
+This ensures both MSE and profit-aware models receive identical position sizing, making the comparison purely about **directional accuracy** rather than prediction magnitude.
+
 ## Usage Examples
 
 ```bash

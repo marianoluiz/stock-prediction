@@ -12,6 +12,13 @@ This project implements your thesis idea:
 
    Loss = -(1 / N) * sum(profit_t)
 
+## Return Metrics
+
+The evaluation tracks two types of cumulative returns:
+
+- **Additive Return** (simple sum): `sum(signal * return - cost)`. Each trade uses the original capital. Simple but unrealistic — ignores compounding.
+- **Geometric Return** (compounding): `product(1 + signal * return - cost) - 1`. Each trade uses the current balance. Losses shrink future trade sizes; gains expand them. Reflects real-world trading.
+
 ## Project Structure
 
 ```
@@ -21,7 +28,7 @@ This project implements your thesis idea:
 ├── utils/
 │   ├── preprocessing.py    # Yahoo Finance download, returns calc, sliding windows
 │   ├── trading.py          # tanh-based trading signal, transaction costs, loss
-│   └── metrics.py          # Directional accuracy, cumulative profit, Sharpe ratio
+│   └── metrics.py          # Directional accuracy, cumulative profit (additive + geometric), Sharpe ratio
 ├── data/AAPL_prices.csv    # 2,105 days of AAPL data (2018-2026)
 ├── results/                # Saved model + loss/profit curves
 └── requirements-*.txt      # pip-tools managed deps (Win + Linux)
