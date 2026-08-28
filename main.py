@@ -3,42 +3,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import torch
 
 from models.gru_model import GRUReturnPredictor
-from training.train import TrainingConfig, fit, run_epoch, to_loader
+from training.train import TrainingConfig, fit, run_epoch
 from utils.metrics import trade_log
-from utils.preprocessing import SplitData, compute_returns, create_sequences, load_stock_data, train_val_test_split
-
-
-def plot_history(history: dict, output_dir: Path, capital: float = 1.0, title: str = "Loss") -> None:
-    """Plot training loss and cumulative profit curves."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    plt.figure(figsize=(10, 4))
-    plt.plot(history["train_loss"], label="Train Loss")
-    plt.plot(history["val_loss"], label="Val Loss")
-    plt.title(title)
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_dir / "loss_curve.png", dpi=200)
-    plt.close()
-
-    plt.figure(figsize=(10, 4))
-    plt.plot([p * capital for p in history["train_profit"]], label="Train Cumulative Profit")
-    plt.plot([p * capital for p in history["val_profit"]], label="Val Cumulative Profit")
-    plt.plot([p * capital for p in history["train_profit_geo"]], label="Train Geometric Profit", linestyle="--")
-    plt.plot([p * capital for p in history["val_profit_geo"]], label="Val Geometric Profit", linestyle="--")
-    plt.title(f"Cumulative Profit per Epoch (Capital: {capital:,.0f} PHP)")
-    plt.xlabel("Epoch")
-    plt.ylabel("Profit (PHP)")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_dir / "profit_curve.png", dpi=200)
-    plt.close()
+from utils.pipeline import prepare_data
+from utils.plotting import plot_history
+from utils.preprocessing import SplitData
 
 
 def run_single(
@@ -149,29 +121,18 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    cache_path = Path("data") / f"{args.symbol}_{args.start}_{args.end or 'latest'}.csv"
-
-    # Load Stock Data
-    df = load_stock_data(args.symbol, args.start, args.end, str(cache_path))
-
-    # Convert Prices into Returns
-    returns = compute_returns(df)
-
-    # Create Sequential Windows
-    dates = returns.index.to_numpy()
-    x, y, seq_dates = create_sequences(returns.values, sequence_length=args.sequence_length, dates=dates)
-
-    # Train / Validation / Test Split
-    split = train_val_test_split(x, y, dates=seq_dates)
+    # Load data, compute returns, window, and chronologically split — the exact
+    # same pipeline used by train.py and evaluate.py.
+    data = prepare_data(args.symbol, args.start, args.end, args.sequence_length, args.batch_size)
+    split = data.split
 
     print(f"Train: {len(split.x_train)} samples ({split.dates_train[0]} -> {split.dates_train[-1]})")
     print(f"Val:   {len(split.x_val)} samples ({split.dates_val[0]} -> {split.dates_val[-1]})")
     print(f"Test:  {len(split.x_test)} samples ({split.dates_test[0]} -> {split.dates_test[-1]})")
 
-    # DataLoader
-    train_loader = to_loader(split.x_train, split.y_train, args.batch_size, shuffle=False)
-    val_loader = to_loader(split.x_val, split.y_val, args.batch_size, shuffle=False)
-    test_loader = to_loader(split.x_test, split.y_test, args.batch_size, shuffle=False)
+    train_loader = data.train_loader
+    val_loader = data.val_loader
+    test_loader = data.test_loader
 
     if args.compare:
         _, mse_test = run_single("mse", args, split, train_loader, val_loader, test_loader, device, show_trade_log=args.trade_log)

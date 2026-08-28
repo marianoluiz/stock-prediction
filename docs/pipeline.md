@@ -1,5 +1,16 @@
 # Pipeline
 
+There are three entry points that share one data-preparation pipeline
+(`utils/pipeline.py` -> `prepare_data()`):
+
+- `train.py` — trains and saves a model; the test set is never touched.
+- `evaluate.py` — loads a saved model and evaluates it on the exact same test
+  window (identical split) without retraining.
+- `main.py` — the original all-in-one run: train + evaluate (+ `--compare`).
+
+`predict.py` — standalone live-forecast demo (no train/test split; seeds from
+the last `sequence_length` returns and iteratively forecasts the next N days).
+
 ## 1. Data Ingestion
 
 `utils/preprocessing.py` - `load_stock_data()`
@@ -53,6 +64,10 @@ Each epoch, for every batch:
 7. **Weight update**: Adam optimizer adjusts parameters.
 
 Repeated for all batches across all epochs. Model weights saved to `results/gru_profit_aware.pt`. Loss and profit curves saved as PNGs to `results/`.
+
+`train.py` saves the final-epoch weights to `--save` (default
+`results/<loss>/gru_<loss>.pt`) alongside its loss/profit curves, without
+evaluating the test set.
 
 ## 6. Evaluation Metrics
 

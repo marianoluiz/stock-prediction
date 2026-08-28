@@ -15,4 +15,4 @@
 
 ## Nice to Have
 
-- [ ] Separate train and test scripts (currently runs both in one go)
+- [ ] Early stopping / best-checkpoint selection in `fit()` (currently saves the last epoch only)
