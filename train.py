@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
                         help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
     parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
-    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1% per trade)")
+    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
 
     # Training

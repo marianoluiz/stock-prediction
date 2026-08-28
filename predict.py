@@ -64,7 +64,7 @@ def main() -> None:
     window = torch.from_numpy(returns[-args.sequence_length:].reshape(1, args.sequence_length, 1)).to(device)
     future_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=args.days)
 
-    print(f"\nData for {args.symbol} up to {last_date.date()} — forecasting the next {args.days} trading days")
+    print(f"\nData for {args.symbol} up to {last_date.date()} - forecasting the next {args.days} trading days")
     print(f"  {'Date':>12}  {'Predicted Return':>17}  {'Signal':>9}")
 
     preds: list[float] = []
@@ -78,7 +78,7 @@ def main() -> None:
         signal = "LONG (+1)" if p > 0 else ("SHORT (-1)" if p < 0 else "FLAT (0)")
         print(f"  {str(day.date()):>12}  {p:>+16.4%}  {signal:>9}")
 
-    print("\nNote: predictions are iterative — each day's forecast is fed back as input.")
+    print("\nNote: predictions are iterative - each day's forecast is fed back as input.")
 
 
 if __name__ == "__main__":

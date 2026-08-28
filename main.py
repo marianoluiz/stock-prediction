@@ -109,7 +109,7 @@ def main() -> None:
     parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
     parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
     parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
-    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1% per trade)")
+    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display (default: 100,000)")
 
     # Training
