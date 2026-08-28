@@ -3,9 +3,36 @@ from __future__ import annotations
 import torch
 
 
+class StraightThroughSignal(torch.autograd.Function):
+    """Binary signal in the forward pass; smooth tanh slope in the backward pass.
+
+    The forward pass returns ``sign(pred)`` (a full long +1 / short -1 position)
+    so that the loss sees exactly the signal used for validation/test metrics.
+    The backward pass pretends the derivative is that of ``tanh(alpha * pred)``
+    so gradients keep flowing through the otherwise flat ``sign`` curve.
+    """
+
+    @staticmethod
+    def forward(ctx, predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
+        ctx.save_for_backward(predicted_return)
+        ctx.alpha = alpha
+        return torch.sign(predicted_return)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None]:
+        (predicted_return,) = ctx.saved_tensors
+        slope = ctx.alpha * (1 - torch.tanh(ctx.alpha * predicted_return) ** 2)
+        return grad_output * slope, None
+
+
 def trading_signal(predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
-    """Continuous differentiable trading signal in [-1, 1]."""
-    return torch.tanh(alpha * predicted_return)
+    """Trading signal with straight-through gradients.
+
+    Forward: ``sign(predicted_return)`` in {-1, +1} (identical to val/test).
+    Backward: derivative of ``tanh(alpha * predicted_return)``; ``alpha`` tunes
+    how smooth that backward slope is (higher = more aggressive/binary-like).
+    """
+    return StraightThroughSignal.apply(predicted_return, alpha)
 
 
 def shifted_previous_signal(

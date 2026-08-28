@@ -17,13 +17,14 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from utils.metrics import (
     cumulative_profit,
+    cumulative_profit_geometric,
     directional_accuracy,
     mean_absolute_error,
     mean_squared_error,
     root_mean_squared_error,
     sharpe_like,
 )
-from utils.trading import profit_aware_loss, trading_signal
+from utils.trading import profit_aware_loss
 
 
 @dataclass
@@ -102,7 +103,7 @@ def run_epoch(
                 loss.backward()
                 optimizer.step()
 
-            signal = trading_signal(pred, alpha)
+            signal = torch.sign(pred)
             if previous_signal is None:
                 prev_signal = torch.zeros(1, device=device, dtype=signal.dtype)
             else:
@@ -132,10 +133,14 @@ def run_epoch(
         "loss": float(np.mean(losses)),
         "directional_acc": directional_accuracy(pred_np, actual_np),
         "cum_profit": cumulative_profit(signal_np, actual_np, transaction_cost_rate=transaction_cost_rate),
+        "cum_profit_geo": cumulative_profit_geometric(signal_np, actual_np, transaction_cost_rate=transaction_cost_rate),
         "sharpe_like": sharpe_like(profit_np),
         "mse": mean_squared_error(pred_np, actual_np),
         "mae": mean_absolute_error(pred_np, actual_np),
         "rmse": root_mean_squared_error(pred_np, actual_np),
+        "pred_np": pred_np,
+        "actual_np": actual_np,
+        "signal_np": signal_np,
     }
 
 
@@ -160,6 +165,8 @@ def fit(
         "val_loss": [],
         "train_profit": [],
         "val_profit": [],
+        "train_profit_geo": [],
+        "val_profit_geo": [],
         "train_dir_acc": [],
         "val_dir_acc": [],
     }
@@ -188,18 +195,24 @@ def fit(
         history["val_loss"].append(val_metrics["loss"])
         history["train_profit"].append(train_metrics["cum_profit"])
         history["val_profit"].append(val_metrics["cum_profit"])
+        history["train_profit_geo"].append(train_metrics["cum_profit_geo"])
+        history["val_profit_geo"].append(val_metrics["cum_profit_geo"])
         history["train_dir_acc"].append(train_metrics["directional_acc"])
         history["val_dir_acc"].append(val_metrics["directional_acc"])
 
         train_profit_php = train_metrics["cum_profit"] * capital
         val_profit_php = val_metrics["cum_profit"] * capital
+        train_profit_geo_php = train_metrics["cum_profit_geo"] * capital
+        val_profit_geo_php = val_metrics["cum_profit_geo"] * capital
 
         tag = f"[{config.loss_type.upper()}] " if config.loss_type != "profit-aware" else ""
         print(
             f"Epoch {epoch:03d}/{config.epochs} | "
             f"{tag}train_loss={train_metrics['loss']:.6f} val_loss={val_metrics['loss']:.6f} | "
             f"train_profit={train_metrics['cum_profit']:.6f} ({train_profit_php:+,.0f} PHP) "
-            f"val_profit={val_metrics['cum_profit']:.6f} ({val_profit_php:+,.0f} PHP)"
+            f"val_profit={val_metrics['cum_profit']:.6f} ({val_profit_php:+,.0f} PHP) | "
+            f"train_geo={train_metrics['cum_profit_geo']:.6f} ({train_profit_geo_php:+,.0f} PHP) "
+            f"val_geo={val_metrics['cum_profit_geo']:.6f} ({val_profit_geo_php:+,.0f} PHP)"
         )
 
     return history
