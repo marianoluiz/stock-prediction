@@ -37,16 +37,19 @@
 Each epoch, for every batch:
 
 1. **Forward pass**: GRU takes a 30-day return window and outputs a predicted next-day return.
-2. **Signal generation**: `signal = tanh(alpha * predicted_return)` — continuous value in [-1, 1].
-   - Positive signal = go long. Negative = go short.
-   - `alpha` controls aggressiveness (higher = more binary).
+2. **Signal generation**: `signal = sign(predicted_return)` — a binary full long (+1) / full short (-1) position.
+   - Positive prediction = go long. Negative = go short.
+   - The **same** binary signal is used in the loss, validation, and test metrics.
 3. **Transaction costs**: Penalizes signal changes between consecutive time steps:
    `cost = cost_rate * |signal_t - signal_{t-1}|`
 4. **Net profit per step**: `signal_t * actual_return_t - cost_t`
 5. **Loss**: `-mean(net_profit)` — minimizing loss = maximizing profit.
    - Profit is good (positive) → loss is negative (small) → optimizer is happy
    - Profit is bad (negative) → loss is positive (large) → optimizer pushes to improve
-6. **Backpropagation**: Gradients flow from the loss through the GRU weights.
+6. **Backpropagation**: `sign` has zero slope everywhere, so gradients would die. A **straight-through estimator** (STE, `utils/trading.py` — `StraightThroughSignal`) replaces the backward derivative with the smooth slope of `tanh(alpha * predicted_return)`:
+   `backward_slope = alpha * (1 - tanh(alpha * predicted_return)^2)`
+   - `alpha` tunes how smooth that backward slope is (2–5 typical; higher = more aggressive/binary-like). It does **not** affect the forward signal or the reported profits.
+   - The real ±1 signal is used in the loss; only the gradient is fudged, so the model still learns direction while being scored exactly as it trades.
 7. **Weight update**: Adam optimizer adjusts parameters.
 
 Repeated for all batches across all epochs. Model weights saved to `results/gru_profit_aware.pt`. Loss and profit curves saved as PNGs to `results/`.

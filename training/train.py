@@ -24,7 +24,7 @@ from utils.metrics import (
     root_mean_squared_error,
     sharpe_like,
 )
-from utils.trading import profit_aware_loss, trading_signal
+from utils.trading import profit_aware_loss
 
 
 @dataclass
