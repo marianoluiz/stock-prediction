@@ -33,6 +33,7 @@ class TrainingConfig:
 
     loss_type: str = "profit-aware"
     alpha: float = 1.0
+    loss_lambda: float = 1.0
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
     batch_size: int = 64
@@ -55,6 +56,7 @@ def run_epoch(
     transaction_cost_rate: float,
     device: torch.device,
     loss_type: str = "profit-aware",
+    loss_lambda: float = 1.0,
     ) -> Dict[str, float]:
     """Run one training or evaluation epoch.
 
@@ -66,6 +68,8 @@ def run_epoch(
         transaction_cost_rate:  Fractional cost per trade.
         device: Target device for tensors.
         loss_type: ``"mse"`` for baseline or ``"profit-aware"`` for custom loss.
+        loss_lambda: Weight of the MSE calibration term added to the custom
+            profit-aware loss (ignored when ``loss_type == "mse"``).
 
     Returns:
         Dictionary of aggregated metrics: ``loss``, ``directional_acc``,
@@ -90,13 +94,14 @@ def run_epoch(
             if loss_type == "mse":
                 loss = F.mse_loss(pred, y_batch)
             else:
-                loss = profit_aware_loss(
+                profit_loss = profit_aware_loss(
                     pred,
                     y_batch,
                     alpha,
                     transaction_cost_rate=transaction_cost_rate,
                     previous_signal=previous_signal,
                 )
+                loss = profit_loss + loss_lambda * F.mse_loss(pred, y_batch)
 
             if is_train:
                 optimizer.zero_grad()
@@ -180,6 +185,7 @@ def fit(
             config.transaction_cost_rate,
             device,
             loss_type=config.loss_type,
+            loss_lambda=config.loss_lambda,
         )
         val_metrics = run_epoch(
             model,
@@ -189,6 +195,7 @@ def fit(
             config.transaction_cost_rate,
             device,
             loss_type=config.loss_type,
+            loss_lambda=config.loss_lambda,
         )
 
         history["train_loss"].append(train_metrics["loss"])

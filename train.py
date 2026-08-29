@@ -37,6 +37,7 @@ def main() -> None:
     parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
                         help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
     parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
+    parser.add_argument("--loss-lambda", type=float, default=1.0,          help="Weight of the MSE calibration term in the profit-aware loss (0 = pure profit, larger = more calibration)")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
 
@@ -70,6 +71,7 @@ def main() -> None:
     config = TrainingConfig(
         loss_type=args.loss,
         alpha=args.alpha,
+        loss_lambda=args.loss_lambda,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
         batch_size=args.batch_size,

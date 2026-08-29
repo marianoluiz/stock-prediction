@@ -48,20 +48,30 @@ the last `sequence_length` returns and iteratively forecasts the next N days).
 Each epoch, for every batch:
 
 1. **Forward pass**: GRU takes a 30-day return window and outputs a predicted next-day return.
-2. **Signal generation**: `signal = sign(predicted_return)` — a binary full long (+1) / full short (-1) position.
-   - Positive prediction = go long. Negative = go short.
-   - The **same** binary signal is used in the loss, validation, and test metrics.
-3. **Transaction costs**: Penalizes signal changes between consecutive time steps:
+2. **Signal generation (training)**: the model outputs a continuous **position**
+   `signal = tanh(alpha * predicted_return)` — a position size between -1 and +1.
+   Positive = go long, negative = go short; magnitude scales confidence. This is
+   the smooth, differentiable signal used inside the *loss*.
+3. **Transaction costs**: Penalizes position changes between consecutive steps:
    `cost = cost_rate * |signal_t - signal_{t-1}|`
 4. **Net profit per step**: `signal_t * actual_return_t - cost_t`
-5. **Loss**: `-mean(net_profit)` — minimizing loss = maximizing profit.
-   - Profit is good (positive) → loss is negative (small) → optimizer is happy
-   - Profit is bad (negative) → loss is positive (large) → optimizer pushes to improve
-6. **Backpropagation**: `sign` has zero slope everywhere, so gradients would die. A **straight-through estimator** (STE, `utils/trading.py` — `StraightThroughSignal`) replaces the backward derivative with the smooth slope of `tanh(alpha * predicted_return)`:
-   `backward_slope = alpha * (1 - tanh(alpha * predicted_return)^2)`
-   - `alpha` tunes how smooth that backward slope is (2–5 typical; higher = more aggressive/binary-like). It does **not** affect the forward signal or the reported profits.
-   - The real ±1 signal is used in the loss; only the gradient is fudged, so the model still learns direction while being scored exactly as it trades.
+5. **Loss (profit-aware)**: `-mean(net_profit)` — minimizing loss = maximizing profit;
+   plus an **MSE calibration term** to keep predictions realistic and gradients alive:
+   `loss = -mean(net_profit) + loss_lambda * mean((pred - actual)^2)`
+   - `loss_lambda` (`--loss-lambda`, default `1.0`) pins `pred` to realistic
+     magnitudes so `tanh` never saturates and the model keeps learning. `loss_lambda
+     = 0` would give the pure profit loss (saturation risk).
+   - The MSE baseline uses just `mean((pred - actual)^2)`.
+6. **Backpropagation**: because the loss uses the smooth `tanh` position, forward
+   and backward are the *same* function — there is **no straight-through estimator**
+   and no fake gradient. Gradients stay alive for every prediction magnitude.
 7. **Weight update**: Adam optimizer adjusts parameters.
+
+**Evaluation**: during eval, the continuous prediction is discretized to a binary
+full-long / full-short action with `signal = sign(predicted_return)` (`+1` / `-1`,
+no hold). This is the signal fed to the profit and directional-accuracy metrics. So
+training optimizes a smooth partial position, while reported profit uses the discrete
+action rule.
 
 Repeated for all batches across all epochs. Model weights saved to `results/gru_profit_aware.pt`. Loss and profit curves saved as PNGs to `results/`.
 
