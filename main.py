@@ -9,7 +9,7 @@ from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch
 from utils.metrics import trade_log
 from utils.pipeline import prepare_data
-from utils.plotting import plot_history
+from utils.plotting import format_date, plot_history
 from utils.preprocessing import SplitData
 
 
@@ -57,7 +57,7 @@ def run_single(
         loss_type=loss_type,
     )
 
-    print(f"\nTest Metrics [{label}] ({split.dates_test[0]} -> {split.dates_test[-1]})")
+    print(f"\nTest Metrics [{label}] ({format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])})")
     print(f"  Loss:                {test_metrics['loss']:.6f}")
     print(f"  MSE:                 {test_metrics['mse']:.8f}")
     print(f"  MAE:                 {test_metrics['mae']:.8f}")
@@ -80,10 +80,24 @@ def run_single(
             transaction_cost_rate=args.transaction_cost,
         )
 
-    results_dir = Path("results") / loss_type.replace("-", "_")
+    loss_key = loss_type.replace("-", "_")
+    end_actual = format_date(split.dates_test[-1])
+    tag = f"{args.symbol}_{loss_key}_{args.start}_{end_actual}"
+
+    results_dir = Path("results") / loss_key
     results_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), results_dir / f"gru_{loss_type.replace('-', '_')}.pt")
-    plot_history(history, results_dir, capital=args.capital, title=f"{label} Loss")
+    torch.save(model.state_dict(), results_dir / f"{tag}.pt")
+    plot_history(
+        history,
+        results_dir,
+        capital=args.capital,
+        symbol=args.symbol,
+        start=args.start,
+        end=end_actual,
+        loss_label=label,
+        split=split,
+        file_prefix=tag,
+    )
 
     return history, test_metrics
 

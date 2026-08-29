@@ -15,7 +15,7 @@ import torch
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit
 from utils.pipeline import prepare_data
-from utils.plotting import plot_history
+from utils.plotting import format_date, plot_history
 
 
 def main() -> None:
@@ -46,7 +46,7 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
 
     # Output
-    parser.add_argument("--save", type=str, default=None,                  help="Path to save model weights (.pt). Defaults to results/<loss>/gru_<loss>.pt")
+    parser.add_argument("--save", type=str, default=None,                  help="Path to save model weights (.pt). Defaults to results/<loss>/<SYMBOL>_<loss>_<START>_<END>.pt")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -84,12 +84,25 @@ def main() -> None:
     history = fit(model, data.train_loader, data.val_loader, config, device, capital=args.capital)
 
     loss_key = args.loss.replace("-", "_")
-    save_path = Path(args.save) if args.save else Path("results") / loss_key / f"gru_{loss_key}.pt"
+    end_actual = format_date(data.dates[-1])
+    tag = f"{args.symbol}_{loss_key}_{args.start}_{end_actual}"
+
+    save_path = Path(args.save) if args.save else Path("results") / loss_key / f"{tag}.pt"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), save_path)
     print(f"\nSaved model to {save_path}")
 
-    plot_history(history, save_path.parent, capital=args.capital, title=f"{label} Loss")
+    plot_history(
+        history,
+        save_path.parent,
+        capital=args.capital,
+        symbol=args.symbol,
+        start=args.start,
+        end=end_actual,
+        loss_label=label,
+        split=split,
+        file_prefix=tag,
+    )
     print(f"Saved loss/profit curves to {save_path.parent}")
 
 

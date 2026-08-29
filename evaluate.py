@@ -15,6 +15,7 @@ from models.gru_model import GRUReturnPredictor
 from training.train import run_epoch
 from utils.metrics import trade_log
 from utils.pipeline import prepare_data
+from utils.plotting import format_date
 
 
 def main() -> None:
@@ -42,6 +43,7 @@ def main() -> None:
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size for evaluation")
     parser.add_argument("--trade-log", action="store_true",                help="Print a per-trade P&L log for every test trade")
+    parser.add_argument("--metrics-out", type=str, default=None,            help="Optional path to write a text summary of the metrics")
     args = parser.parse_args()
 
     model_path = Path(args.model)
@@ -54,7 +56,8 @@ def main() -> None:
     data = prepare_data(args.symbol, args.start, args.end, args.sequence_length, args.batch_size)
     split = data.split
 
-    print(f"Test period: {split.dates_test[0]} -> {split.dates_test[-1]} ({len(split.x_test)} samples)")
+    end_actual = format_date(data.dates[-1])
+    print(f"Test period: {format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])} ({len(split.x_test)} samples)")
 
     model = GRUReturnPredictor(
         input_size=1,
@@ -98,6 +101,29 @@ def main() -> None:
             args.capital,
             transaction_cost_rate=args.transaction_cost,
         )
+
+    if args.metrics_out:
+        out = Path(args.metrics_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        body = (
+            f"Symbol:         {args.symbol}\n"
+            f"Reporting period: {args.start} -> {end_actual}\n"
+            f"Model:          {model_path}\n"
+            f"Loss:           {args.loss}\n"
+            f"Test period:    {format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])} "
+            f"({len(split.x_test)} samples)\n"
+            f"\n"
+            f"Loss:                  {test_metrics['loss']:.6f}\n"
+            f"MSE:                   {test_metrics['mse']:.8f}\n"
+            f"MAE:                   {test_metrics['mae']:.8f}\n"
+            f"RMSE:                  {test_metrics['rmse']:.8f}\n"
+            f"Directional Accuracy:  {test_metrics['directional_acc']:.4f}\n"
+            f"Cumulative Return:     {test_metrics['cum_profit']:.6f} ({test_metrics['cum_profit'] * args.capital:+,.2f} PHP)\n"
+            f"Geometric Return:      {test_metrics['cum_profit_geo']:.6f} ({test_metrics['cum_profit_geo'] * args.capital:+,.2f} PHP)\n"
+            f"Sharpe-like Ratio:     {test_metrics['sharpe_like']:.4f}\n"
+        )
+        out.write_text(body, encoding="utf-8")
+        print(f"\nSaved metrics to {out}")
 
 
 if __name__ == "__main__":
