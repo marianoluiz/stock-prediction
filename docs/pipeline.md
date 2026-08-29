@@ -55,12 +55,13 @@ Each epoch, for every batch:
 3. **Transaction costs**: Penalizes position changes between consecutive steps:
    `cost = cost_rate * |signal_t - signal_{t-1}|`
 4. **Net profit per step**: `signal_t * actual_return_t - cost_t`
-5. **Loss (profit-aware)**: `-mean(net_profit)` — minimizing loss = maximizing profit;
-   plus an **MSE calibration term** to keep predictions realistic and gradients alive:
-   `loss = -mean(net_profit) + loss_lambda * mean((pred - actual)^2)`
-   - `loss_lambda` (`--loss-lambda`, default `1.0`) pins `pred` to realistic
-     magnitudes so `tanh` never saturates and the model keeps learning. `loss_lambda
-     = 0` would give the pure profit loss (saturation risk).
+5. **Loss (profit-aware)**: `-mean(net_profit)` — minimizing loss = maximizing profit:
+   `loss = -mean(net_profit)`
+   - An optional **MSE calibration term** `loss_lambda * mean((pred - actual)^2)` can
+     be added via `--loss-lambda` (default `0`, i.e. disabled). Setting it non-zero
+     (e.g. `1.0`) pins `pred` to realistic magnitudes so `tanh` never saturates and
+     the model keeps learning — but it also steers the model toward an MSE-like fit
+     and away from the raw profit objective.
    - The MSE baseline uses just `mean((pred - actual)^2)`.
 6. **Backpropagation**: because the loss uses the smooth `tanh` position, forward
    and backward are the *same* function — there is **no straight-through estimator**

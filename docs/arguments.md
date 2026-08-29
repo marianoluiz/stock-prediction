@@ -44,7 +44,7 @@ the test window is identical between them.
 | `--loss` | `str` | `profit-aware` | Loss function: `mse` (baseline) or `profit-aware` (custom). |
 | `--compare` | flag | `False` | Run both loss functions and print a side-by-side comparison table. |
 | `--alpha` | `float` | `1.0` | Sharpness of tanh signal: higher = more aggressive binary-like positioning. |
-| `--loss-lambda` | `float` | `1.0` | Weight of the MSE calibration term added to the profit-aware loss (`0` = pure profit, larger = more calibration). Helps prevent gradient saturation. |
+| `--loss-lambda` | `float` | `0.0` | Weight of the MSE calibration term added to the profit-aware loss. `0` (default) = pure profit loss `-mean(net_profit)`. Larger values add MSE calibration, which prevents gradient saturation but steers the model toward an MSE-like fit. |
 | `--transaction-cost` | `float` | `0.001` | Simulated trading cost per trade as a rate (0.001 = 0.1%). |
 | `--capital` | `float` | `100000.0` | Starting capital in PHP for simulated trading display. Converts percentage returns to PHP amounts in output. |
 

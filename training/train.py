@@ -33,7 +33,7 @@ class TrainingConfig:
 
     loss_type: str = "profit-aware"
     alpha: float = 1.0
-    loss_lambda: float = 1.0
+    loss_lambda: float = 0.0
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
     batch_size: int = 64
