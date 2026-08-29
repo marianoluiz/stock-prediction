@@ -12,6 +12,9 @@ This project implements your thesis idea:
 
    Loss = -(1 / N) * sum(profit_t)
 
+See [docs/algorithm.md](docs/algorithm.md) for the full original thesis
+algorithm (Steps 0-11) this project implements.
+
 ## Return Metrics
 
 The evaluation tracks two types of cumulative returns:

@@ -1,8 +1,10 @@
 # Agent notes for this repo
 
 Thesis project: GRU return predictor with a profit-aware trading loss vs. an MSE
-baseline. See `README.md` for architecture/usage. This file is about pitfalls
-that aren't obvious from the code alone.
+baseline. See `README.md` for architecture/usage and `docs/algorithm.md` for
+the original thesis algorithm (Steps 0-11) the code is meant to implement —
+treat it as the spec to check code against, not a doc to edit when code
+drifts. This file is about pitfalls that aren't obvious from the code alone.
 
 ## Environment
 
