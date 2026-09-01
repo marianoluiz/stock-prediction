@@ -11,6 +11,7 @@ from utils.metrics import trade_log
 from utils.pipeline import prepare_data
 from utils.plotting import format_date, plot_history
 from utils.preprocessing import SplitData
+from utils.trading import calibrate_alpha
 
 
 def run_single(
@@ -35,6 +36,7 @@ def run_single(
         loss_type=loss_type,
         alpha=args.alpha,
         loss_lambda=args.loss_lambda,
+        signal_threshold=args.signal_threshold,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
         batch_size=args.batch_size,
@@ -56,6 +58,7 @@ def run_single(
         args.transaction_cost,
         device,
         loss_type=loss_type,
+        signal_threshold=args.signal_threshold,
     )
 
     print(f"\nTest Metrics [{label}] ({format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])})")
@@ -123,8 +126,9 @@ def main() -> None:
                         help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
     parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
     parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
-    parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
+    parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
     parser.add_argument("--loss-lambda", type=float, default=0.1,          help="Weight of the MSE calibration term in the profit-aware loss (0 = pure profit, larger = more calibration; 0 lets pred drift unbounded and saturate tanh, see TODO.md)")
+    parser.add_argument("--signal-threshold", type=float, default=0.0,     help="Minimum |tanh(alpha*pred)| confidence required to take a position; below it the executed signal is flat (0) instead of always full sign(pred)")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display (default: 100,000)")
 
@@ -141,6 +145,10 @@ def main() -> None:
     # same pipeline used by train.py and evaluate.py.
     data = prepare_data(args.symbol, args.start, args.end, args.sequence_length, args.batch_size)
     split = data.split
+
+    if args.alpha is None:
+        args.alpha = calibrate_alpha(split.y_train)
+        print(f"Auto-calibrated alpha: {args.alpha:.4f} (train return std = {split.y_train.std():.6f})")
 
     print(f"Train: {len(split.x_train)} samples ({split.dates_train[0]} -> {split.dates_train[-1]})")
     print(f"Val:   {len(split.x_val)} samples ({split.dates_val[0]} -> {split.dates_val[-1]})")

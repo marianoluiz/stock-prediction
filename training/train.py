@@ -24,7 +24,7 @@ from utils.metrics import (
     root_mean_squared_error,
     sharpe_like,
 )
-from utils.trading import profit_aware_loss
+from utils.trading import profit_aware_loss, thresholded_signal
 
 
 @dataclass
@@ -34,6 +34,7 @@ class TrainingConfig:
     loss_type: str = "profit-aware"
     alpha: float = 1.0
     loss_lambda: float = 0.1
+    signal_threshold: float = 0.0
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
     batch_size: int = 64
@@ -57,6 +58,7 @@ def run_epoch(
     device: torch.device,
     loss_type: str = "profit-aware",
     loss_lambda: float = 1.0,
+    signal_threshold: float = 0.0,
     ) -> Dict[str, float]:
     """Run one training or evaluation epoch.
 
@@ -70,6 +72,9 @@ def run_epoch(
         loss_type: ``"mse"`` for baseline or ``"profit-aware"`` for custom loss.
         loss_lambda: Weight of the MSE calibration term added to the custom
             profit-aware loss (ignored when ``loss_type == "mse"``).
+        signal_threshold: Minimum ``|tanh(alpha * pred)|`` confidence required
+            to take a position; below it the executed signal is flat (``0``)
+            instead of always full ``sign(pred)``.
 
     Returns:
         Dictionary of aggregated metrics: ``loss``, ``directional_acc``,
@@ -108,7 +113,7 @@ def run_epoch(
                 loss.backward()
                 optimizer.step()
 
-            signal = torch.sign(pred)
+            signal = thresholded_signal(pred, alpha, signal_threshold)
             if previous_signal is None:
                 prev_signal = torch.zeros(1, device=device, dtype=signal.dtype)
             else:
@@ -186,6 +191,7 @@ def fit(
             device,
             loss_type=config.loss_type,
             loss_lambda=config.loss_lambda,
+            signal_threshold=config.signal_threshold,
         )
         val_metrics = run_epoch(
             model,
@@ -196,6 +202,7 @@ def fit(
             device,
             loss_type=config.loss_type,
             loss_lambda=config.loss_lambda,
+            signal_threshold=config.signal_threshold,
         )
 
         history["train_loss"].append(train_metrics["loss"])

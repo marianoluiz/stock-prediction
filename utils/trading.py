@@ -1,6 +1,24 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
+
+
+def calibrate_alpha(train_returns: np.ndarray) -> float:
+    """Pick ``alpha`` so a one-std-dev predicted return saturates ``tanh`` to ~0.76.
+
+    ``alpha = 1 / std(train_returns)``. Daily equity returns are O(1%), so a
+    fixed ``alpha`` tuned for one asset is badly miscalibrated for another with
+    different volatility (e.g. SPY vs NVDA) — deriving it from the *training*
+    split's own return scale keeps ``tanh(alpha * pred)`` meaningfully
+    sensitive across assets instead of sitting in its near-linear dead zone
+    (``alpha`` too small) or saturating for every prediction (``alpha`` too
+    large).
+    """
+    std = float(np.std(train_returns))
+    if std <= 0:
+        return 1.0
+    return 1.0 / std
 
 
 def smooth_signal(predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
@@ -13,6 +31,23 @@ def smooth_signal(predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
     confident we are and sign is the direction.
     """
     return torch.tanh(alpha * predicted_return)
+
+
+def thresholded_signal(
+    predicted_return: torch.Tensor,
+    alpha: float,
+    threshold: float = 0.0,
+) -> torch.Tensor:
+    """Discrete long/flat/short execution signal, gated by confidence.
+
+    Confidence is ``|tanh(alpha * predicted_return)|``. When it clears
+    ``threshold`` the position is taken at full size (``sign(predicted_return)``);
+    otherwise the position is flat (``0``). ``threshold=0.0`` reduces to the old
+    always-in-the-market ``sign()`` rule.
+    """
+    confidence = smooth_signal(predicted_return, alpha).abs()
+    full_signal = torch.sign(predicted_return)
+    return torch.where(confidence >= threshold, full_signal, torch.zeros_like(full_signal))
 
 
 def shifted_previous_signal(

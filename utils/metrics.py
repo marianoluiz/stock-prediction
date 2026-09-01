@@ -109,10 +109,11 @@ def trade_log(
 
         date_str = str(dates[i])[:10] if i < len(dates) else "?"
 
+        sig_label = "+1" if s > 0 else "-1" if s < 0 else "FLAT"
         sign = "+" if net_return >= 0 else ""
         print(
             f"{i+1:4d}  {date_str:>12}  {r*100:>+7.2f}%  {p:>+8.4f}  "
-            f"{'  +1' if s > 0 else '  -1':>6}  "
+            f"{sig_label:>6}  "
             f"{sign}{net_return*capital:>+11,.0f}  "
             f"{add_balance:>13,.0f}  {geo_balance:>13,.0f}"
         )

@@ -57,22 +57,28 @@ Each epoch, for every batch:
 4. **Net profit per step**: `signal_t * actual_return_t - cost_t`
 5. **Loss (profit-aware)**: `-mean(net_profit)` — minimizing loss = maximizing profit:
    `loss = -mean(net_profit)`
-   - An optional **MSE calibration term** `loss_lambda * mean((pred - actual)^2)` can
-     be added via `--loss-lambda` (default `0`, i.e. disabled). Setting it non-zero
-     (e.g. `1.0`) pins `pred` to realistic magnitudes so `tanh` never saturates and
-     the model keeps learning — but it also steers the model toward an MSE-like fit
-     and away from the raw profit objective.
+   - An **MSE calibration term** `loss_lambda * mean((pred - actual)^2)` is added via
+     `--loss-lambda` (default `0.1`). At `0`, `pred` drifts unbounded and `tanh`
+     saturates, killing the gradient (see `TODO.md`). The default `0.1` pins `pred`
+     to realistic magnitudes so `tanh` never saturates and the model keeps learning —
+     but it also steers the model toward an MSE-like fit and away from the raw profit
+     objective.
    - The MSE baseline uses just `mean((pred - actual)^2)`.
 6. **Backpropagation**: because the loss uses the smooth `tanh` position, forward
    and backward are the *same* function — there is **no straight-through estimator**
    and no fake gradient. Gradients stay alive for every prediction magnitude.
 7. **Weight update**: Adam optimizer adjusts parameters.
 
-**Evaluation**: during eval, the continuous prediction is discretized to a binary
-full-long / full-short action with `signal = sign(predicted_return)` (`+1` / `-1`,
-no hold). This is the signal fed to the profit and directional-accuracy metrics. So
-training optimizes a smooth partial position, while reported profit uses the discrete
-action rule.
+**Evaluation**: during eval, the continuous prediction is discretized to a
+long / flat / short action: `signal = sign(predicted_return)` when
+`|tanh(alpha * predicted_return)| >= --signal-threshold`, else `0` (flat). At
+the default `--signal-threshold 0.0` this is always full `sign(predicted_return)`
+(no flat state, the original rule). Raising the threshold sits out low-confidence
+predictions instead of always taking a full ±1 position, which also cuts
+transaction-cost churn on those days. This is the signal fed to the profit
+metrics (`directional_accuracy` compares `sign(pred)` to `sign(actual)`
+directly and is unaffected by the threshold). So training optimizes a smooth
+partial position, while reported profit uses this discrete action rule.
 
 Repeated for all batches across all epochs. Model weights saved to `results/gru_profit_aware.pt`. Loss and profit curves saved as PNGs to `results/`.
 
