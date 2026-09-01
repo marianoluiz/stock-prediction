@@ -143,6 +143,8 @@ python predict.py --model models/nvda_pa.pt --symbol NVDA --days 10
 3. `python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
 4. Compare the two metric tables in your thesis write-up.
 5. `python predict.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt` for the live demo.
+6. `python main.py --loss mse --trade-log --symbol spy`
+7. `python main.py --loss profit-aware --trade-log --symbol spy`
 
 > `main.py --compare` still exists as a shortcut that trains both losses in one
 > run and prints a side-by-side comparison table.
