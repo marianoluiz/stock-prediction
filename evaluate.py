@@ -39,7 +39,7 @@ def main() -> None:
 
     # Trading / Display
     parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal")
-    parser.add_argument("--loss-lambda", type=float, default=0.0,          help="Weight of the MSE calibration term in the profit-aware loss")
+    parser.add_argument("--loss-lambda", type=float, default=0.1,          help="Weight of the MSE calibration term in the profit-aware loss (0 lets pred drift unbounded and saturate tanh)")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size for evaluation")
