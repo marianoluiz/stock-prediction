@@ -26,28 +26,59 @@ the last `sequence_length` returns and iteratively forecasts the next N days).
   `r_t = (P_{t+1} - P_t) / P_t`
 - This normalizes the data and removes price-level bias.
 
-## 3. Sliding Window Sequences
+## 3. Lagged-Return Feature Channels
+
+`utils/preprocessing.py` - `build_lagged_features()`
+
+- Adds `return_lag1`, `return_lag5`, `return_lag10` as explicit channels alongside
+  the raw same-day return (`DEFAULT_LAGS = (1, 5, 10)`), so the GRU gets direct
+  access to specific historical returns at every timestep instead of relying on
+  its recurrence to bridge that many steps on its own.
+- Column 0 stays the raw return (also the prediction target downstream);
+  rows without enough history for the longest lag are dropped.
+
+## 3b. Volume Z-Score and Rolling Volatility
+
+`utils/preprocessing.py` - `build_volume_zscore()`, `build_rolling_volatility()`
+
+- `volume_zscore`: rolling z-score of trading volume over a 20-day window
+  (`DEFAULT_VOLUME_WINDOW = 20`) — how unusual today's volume is versus its
+  own trailing history. Z-scored (unlike returns) because raw volume levels
+  vary by orders of magnitude across tickers.
+- `volatility`: rolling standard deviation of daily returns over a 10-day
+  window (`DEFAULT_VOLATILITY_WINDOW = 10`) — a realized-volatility regime
+  signal on a shorter timescale than the volume z-score, so it reacts to
+  vol clustering faster. Fed raw (no z-scoring) since returns are already on
+  a small, comparable scale.
+- Both are joined onto the lagged-return frame in `build_feature_frame()`;
+  rows without enough history for the longest lag, the volume window, or the
+  volatility window are dropped.
+
+## 4. Sliding Window Sequences
 
 `utils/preprocessing.py` - `create_sequences()`
 
-- Slides a fixed-size window (default 30 days) over the return series.
-- Each sample: input = `r[t] .. r[t+30]`, target = `r[t+31]`.
-- Produces tensors of shape `[N, sequence_length, 1]` (input) and `[N]` (target).
+- Slides a fixed-size window (default 30 days) over the multi-channel feature array.
+- Each sample: input = `features[t : t+30]`, target = `features[t+30, 0]` (the raw return).
+- Produces tensors of shape `[N, sequence_length, 1 + len(lags) + 2]` (return +
+  lags + volume z-score + volatility) (input) and `[N]` (target).
 
-## 4. Chronological Split
+## 5. Chronological Split
 
 `utils/preprocessing.py` - `train_val_test_split()`
 
 - Splits data sequentially (no shuffling) into train (70%), validation (15%), test (15%).
 - Preserves temporal ordering to prevent look-ahead bias.
 
-## 5. Training Loop
+## 6. Training Loop
 
 `training/train.py` - `fit()` | `utils/trading.py` - `profit_aware_loss()` | `models/gru_model.py` - `GRUReturnPredictor`
 
 Each epoch, for every batch:
 
-1. **Forward pass**: GRU takes a 30-day return window and outputs a predicted next-day return.
+1. **Forward pass**: GRU takes a 30-day window of the raw return, lagged-return
+   channels (`return_lag1/5/10`), the volume z-score, and rolling volatility,
+   and outputs a predicted next-day return.
 2. **Signal generation (training)**: the model outputs a continuous **position**
    `signal = tanh(alpha * predicted_return)` — a position size between -1 and +1.
    Positive = go long, negative = go short; magnitude scales confidence. This is
@@ -86,7 +117,7 @@ Repeated for all batches across all epochs. Model weights saved to `results/gru_
 `results/<loss>/gru_<loss>.pt`) alongside its loss/profit curves, without
 evaluating the test set.
 
-## 6. Evaluation Metrics
+## 7. Evaluation Metrics
 
 `utils/metrics.py`
 

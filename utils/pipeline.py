@@ -13,7 +13,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 
 from training.train import to_loader
-from utils.preprocessing import SplitData, compute_returns, create_sequences, load_stock_data, train_val_test_split
+from utils.preprocessing import SplitData, build_feature_frame, compute_returns, create_sequences, load_stock_data, train_val_test_split
 
 
 @dataclass
@@ -57,8 +57,9 @@ def prepare_data(
     """
     df = load_stock_data(symbol, start, end, cache_path_for(symbol, start, end))
     returns = compute_returns(df)
-    dates = returns.index.to_numpy()
-    x, y, seq_dates = create_sequences(returns.values, sequence_length=sequence_length, dates=dates)
+    features = build_feature_frame(df)
+    dates = features.index.to_numpy()
+    x, y, seq_dates = create_sequences(features.values, sequence_length=sequence_length, dates=dates)
     split = train_val_test_split(x, y, dates=seq_dates)
 
     return PreparedData(

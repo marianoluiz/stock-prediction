@@ -26,7 +26,7 @@ def run_single(
 ) -> tuple[dict, dict]:
     """Train one model with the given loss type and return (history, test_metrics)."""
     model = GRUReturnPredictor(
-        input_size=1,
+        input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
@@ -41,6 +41,9 @@ def run_single(
         learning_rate=args.lr,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        early_stop_patience=args.early_stop_patience,
+        early_stop_min_delta=args.early_stop_min_delta,
+        early_stop_metric=args.early_stop_metric,
     )
 
     label = loss_type.upper().replace("-", " ")
@@ -136,6 +139,10 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=50,                  help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size")
     parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
+    parser.add_argument("--early-stop-patience", type=int, default=0,      help="Stop training if --early-stop-metric doesn't improve for this many epochs (0 = disabled, train the full --epochs). Restores the best-epoch weights before saving.")
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
+    parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"],
+                        help="Validation metric to monitor for early stopping")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

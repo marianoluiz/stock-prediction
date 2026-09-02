@@ -67,7 +67,7 @@ def main() -> None:
     print(f"Test period: {format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])} ({len(split.x_test)} samples)")
 
     model = GRUReturnPredictor(
-        input_size=1,
+        input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,

@@ -29,7 +29,7 @@
       `results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`),
       graph titles show symbol, range, and train/val/test split
 - [x] Add optional `--metrics-out` to `evaluate.py` to save a metrics summary file
-
-## Nice to Have
-
-- [ ] Early stopping / best-checkpoint selection in `fit()` (currently saves the last epoch only)
+- [x] Early stopping / best-checkpoint selection in `fit()` — opt-in via `--early-stop-patience`
+      (0 = disabled, trains the full `--epochs` as before). Monitors `--early-stop-metric`
+      (default `val_loss`) on the validation set and restores the best-epoch weights into
+      `model` before returning, instead of leaving the last epoch's.

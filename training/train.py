@@ -7,6 +7,7 @@ accuracy, and a Sharpe-like metric.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -39,6 +40,9 @@ class TrainingConfig:
     learning_rate: float = 1e-3
     batch_size: int = 64
     epochs: int = 50
+    early_stop_patience: int = 0
+    early_stop_min_delta: float = 0.0
+    early_stop_metric: str = "val_loss"
 
 
 def to_loader(x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) -> DataLoader:
@@ -168,6 +172,12 @@ def fit(
     ``utils.trading``.  Returns a dict whose keys are metric names
     (e.g. ``train_loss``, ``val_profit``) and whose values are per-epoch
     lists.
+
+    If ``config.early_stop_patience > 0``, training stops once
+    ``config.early_stop_metric`` (evaluated on the validation set) fails to
+    improve by more than ``config.early_stop_min_delta`` for that many
+    consecutive epochs, and *model* is left holding the best-epoch weights
+    rather than the last epoch's.
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     history: Dict[str, list] = {
@@ -180,6 +190,19 @@ def fit(
         "train_dir_acc": [],
         "val_dir_acc": [],
     }
+
+    # Maps a monitorable metric name to (key in run_epoch's result dict, lower-is-better).
+    metric_map = {
+        "val_loss": ("loss", True),
+        "val_profit": ("cum_profit", False),
+        "val_profit_geo": ("cum_profit_geo", False),
+        "val_dir_acc": ("directional_acc", False),
+    }
+    monitor_key, lower_is_better = metric_map.get(config.early_stop_metric, ("loss", True))
+    best_score: float | None = None
+    best_epoch = 0
+    best_state: Dict[str, torch.Tensor] | None = None
+    epochs_no_improve = 0
 
     for epoch in range(1, config.epochs + 1):
         train_metrics = run_epoch(
@@ -228,5 +251,31 @@ def fit(
             f"train_geo={train_metrics['cum_profit_geo']:.6f} ({train_profit_geo_php:+,.0f} PHP) "
             f"val_geo={val_metrics['cum_profit_geo']:.6f} ({val_profit_geo_php:+,.0f} PHP)"
         )
+
+        if config.early_stop_patience > 0:
+            current = val_metrics[monitor_key]
+            improved = (
+                best_score is None
+                or (current < best_score - config.early_stop_min_delta if lower_is_better
+                    else current > best_score + config.early_stop_min_delta)
+            )
+            if improved:
+                best_score = current
+                best_epoch = epoch
+                best_state = copy.deepcopy(model.state_dict())
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+            if epochs_no_improve >= config.early_stop_patience:
+                print(
+                    f"Early stopping at epoch {epoch}: no improvement in "
+                    f"{config.early_stop_metric} for {config.early_stop_patience} epochs "
+                    f"(best={best_score:.6f} at epoch {best_epoch})"
+                )
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     return history

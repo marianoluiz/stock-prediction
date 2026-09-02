@@ -104,30 +104,130 @@ def compute_returns(df: pd.DataFrame, price_col: str = "Close") -> pd.Series:
     return returns
 
 
-def create_sequences(returns: np.ndarray, sequence_length: int, dates: np.ndarray | None = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Create sliding-window samples from a 1-D returns array.
+DEFAULT_LAGS: Tuple[int, ...] = (1, 5, 10)
 
-    For each index ``i`` the input window ``returns[i : i + sequence_length]``
-    becomes one sample and the target is ``returns[i + sequence_length]``.
+
+def build_lagged_features(returns: pd.Series, lags: Tuple[int, ...] = DEFAULT_LAGS) -> pd.DataFrame:
+    """Build a feature frame: raw return plus explicit lagged-return channels.
+
+    Column 0 (``"return"``) is the same-day return — used downstream both as
+    a model input and as the prediction target. Each additional column is the
+    return from ``lag`` days earlier, handed to the GRU directly at every
+    timestep instead of relying on its recurrence to bridge that many steps.
+    Rows without enough history for the largest lag are dropped.
 
     Args:
-        returns:         1-D array of daily percentage returns.
-        sequence_length: Number of past days per sample (lookback window).
-        dates:           Optional array of dates aligned with ``returns``.
+        returns: 1-D return series, e.g. from ``compute_returns``.
+        lags:    Lag offsets (in days) to add as separate channels.
 
     Returns:
-        ``(x, y, dates_out)`` where ``x`` has shape ``[N, sequence_length, 1]``,
+        A DataFrame indexed like ``returns`` with columns
+        ``["return", "return_lag{lag}", ...]``.
+    """
+    feats = {"return": returns}
+    for lag in lags:
+        feats[f"return_lag{lag}"] = returns.shift(lag)
+    return pd.DataFrame(feats).dropna()
+
+
+DEFAULT_VOLUME_WINDOW = 20
+
+
+def build_volume_zscore(volume: pd.Series, window: int = DEFAULT_VOLUME_WINDOW) -> pd.Series:
+    """Rolling z-score of trading volume: how unusual today's volume is versus
+    its own trailing window. Volume spikes often precede or accompany real
+    price moves; z-scoring makes the signal comparable across tickers with
+    very different absolute volume levels (e.g. SPY vs. a small-cap).
+
+    Args:
+        volume: 1-D trading-volume series.
+        window: Trailing window (days) used for the rolling mean/std.
+
+    Returns:
+        A ``pd.Series`` named ``"volume_zscore"``, ``NaN`` for the first
+        ``window - 1`` rows (insufficient history).
+    """
+    rolling_mean = volume.rolling(window).mean()
+    rolling_std = volume.rolling(window).std()
+    z = (volume - rolling_mean) / (rolling_std + 1e-8)
+    z.name = "volume_zscore"
+    return z
+
+
+DEFAULT_VOLATILITY_WINDOW = 10
+
+
+def build_rolling_volatility(returns: pd.Series, window: int = DEFAULT_VOLATILITY_WINDOW) -> pd.Series:
+    """Rolling volatility: trailing standard deviation of daily returns.
+
+    A realized-volatility regime signal, distinct from the 20-day volume
+    z-score's timescale — using the shorter 10-day window so it reacts to
+    volatility clustering faster. Unlike raw volume, returns are already on a
+    small, comparable scale, so no z-scoring is needed here.
+
+    Args:
+        returns: 1-D return series, e.g. from ``compute_returns``.
+        window:  Trailing window (days) used for the rolling std.
+
+    Returns:
+        A ``pd.Series`` named ``"volatility"``, ``NaN`` for the first
+        ``window - 1`` rows (insufficient history).
+    """
+    vol = returns.rolling(window).std()
+    vol.name = "volatility"
+    return vol
+
+
+def build_feature_frame(
+    df: pd.DataFrame,
+    price_col: str = "Close",
+    volume_col: str = "Volume",
+    lags: Tuple[int, ...] = DEFAULT_LAGS,
+    volume_window: int = DEFAULT_VOLUME_WINDOW,
+    volatility_window: int = DEFAULT_VOLATILITY_WINDOW,
+) -> pd.DataFrame:
+    """Combine the raw return, lagged-return channels, a volume z-score, and
+    rolling volatility into one aligned feature frame.
+
+    Column 0 (``"return"``) stays the raw same-day return — used downstream
+    both as a model input and the prediction target. Rows without enough
+    history for the longest lag, the volume window, or the volatility window
+    are dropped.
+    """
+    returns = compute_returns(df, price_col)
+    features = build_lagged_features(returns, lags)
+    vol_z = build_volume_zscore(df[volume_col], volume_window)
+    volatility = build_rolling_volatility(returns, volatility_window)
+    return features.join(vol_z, how="left").join(volatility, how="left").dropna()
+
+
+def create_sequences(features: np.ndarray, sequence_length: int, dates: np.ndarray | None = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Create sliding-window samples from a multi-channel feature array.
+
+    ``features`` has shape ``[T, C]`` where column 0 is the raw return (also
+    used as the prediction target) and any remaining columns are auxiliary
+    channels (e.g. lagged returns) available to the model at every timestep.
+    For each index ``i`` the window ``features[i : i + sequence_length]``
+    becomes one sample and the target is ``features[i + sequence_length, 0]``.
+
+    Args:
+        features:        2-D array of shape ``[T, C]``; column 0 is the raw return.
+        sequence_length: Number of past days per sample (lookback window).
+        dates:           Optional array of dates aligned with ``features``.
+
+    Returns:
+        ``(x, y, dates_out)`` where ``x`` has shape ``[N, sequence_length, C]``,
         ``y`` has shape ``[N]``, and ``dates_out`` has shape ``[N]`` (or ``None``
         if no dates were provided).
     """
     x, y, d = [], [], []
-    for i in range(len(returns) - sequence_length):
-        x.append(returns[i : i + sequence_length])
-        y.append(returns[i + sequence_length])
+    for i in range(len(features) - sequence_length):
+        x.append(features[i : i + sequence_length])
+        y.append(features[i + sequence_length, 0])
         if dates is not None:
             d.append(dates[i + sequence_length])
 
-    x_arr = np.asarray(x, dtype=np.float32)[..., np.newaxis]  # [N, seq_len, 1]
+    x_arr = np.asarray(x, dtype=np.float32)  # [N, seq_len, C]
     y_arr = np.asarray(y, dtype=np.float32)  # [N]
     d_arr = np.asarray(d) if dates is not None else None
     return x_arr, y_arr, d_arr

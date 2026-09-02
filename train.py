@@ -47,6 +47,10 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=50,                  help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size")
     parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
+    parser.add_argument("--early-stop-patience", type=int, default=0,      help="Stop training if --early-stop-metric doesn't improve for this many epochs (0 = disabled, train the full --epochs). Restores the best-epoch weights before saving.")
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
+    parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"],
+                        help="Validation metric to monitor for early stopping")
 
     # Output
     parser.add_argument("--save", type=str, default=None,                  help="Path to save model weights (.pt). Defaults to results/<loss>/<SYMBOL>_<loss>_<START>_<END>.pt")
@@ -68,7 +72,7 @@ def main() -> None:
     print("Note: the test set is left untouched. Evaluate it later with evaluate.py.")
 
     model = GRUReturnPredictor(
-        input_size=1,
+        input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
@@ -83,6 +87,9 @@ def main() -> None:
         learning_rate=args.lr,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        early_stop_patience=args.early_stop_patience,
+        early_stop_min_delta=args.early_stop_min_delta,
+        early_stop_metric=args.early_stop_metric,
     )
 
     label = args.loss.upper().replace("-", " ")
