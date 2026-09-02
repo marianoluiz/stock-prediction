@@ -272,3 +272,75 @@ def train_val_test_split(
         dates_val=dates[train_end:val_end] if dates is not None else np.array([]),
         dates_test=dates[val_end:] if dates is not None else np.array([]),
     )
+
+
+def expanding_walk_forward_folds(
+    x: np.ndarray,
+    y: np.ndarray,
+    n_folds: int = 4,
+    eval_fraction: float = 0.30,
+    val_ratio: float = 0.15,
+    dates: np.ndarray | None = None,
+) -> list[SplitData]:
+    """Expanding-window walk-forward splits for out-of-time validation.
+
+    Reserves the trailing ``eval_fraction`` of the sequence as the
+    walk-forward evaluation region and divides it into ``n_folds`` contiguous
+    test chunks. Fold ``k`` trains on everything chronologically before its
+    test chunk (an expanding window -- later folds see strictly more history
+    than earlier ones), with a ``val_ratio`` slice carved from the tail of
+    that train pool so each fold has the same train/val/test shape
+    ``train_val_test_split`` produces.
+
+    With the defaults (``eval_fraction=0.30``, ``n_folds=4``), fold 0's
+    train/val boundary lands at 0.70 and fold 2's at 0.85 -- the same cuts
+    ``train_val_test_split``'s defaults (``train_ratio=0.7``, ``val_ratio=
+    0.15``) produce -- so the single-split result is recoverable as one point
+    in this sequence rather than a separate methodology.
+
+    Args:
+        x, y:          Full windowed feature/target arrays (unsplit).
+        n_folds:       Number of walk-forward folds.
+        eval_fraction: Fraction of the sequence reserved as the evaluation
+                       region, split into ``n_folds`` contiguous test chunks.
+        val_ratio:     Fraction of each fold's train pool held out as val.
+        dates:         Optional dates array aligned with ``x`` and ``y``.
+
+    Returns:
+        A list of ``n_folds`` :class:`SplitData`, one per fold, in
+        chronological order.
+    """
+    n = len(x)
+    eval_start = int(n * (1 - eval_fraction))
+    fold_size = (n - eval_start) // n_folds
+
+    folds: list[SplitData] = []
+    for k in range(n_folds):
+        test_start = eval_start + k * fold_size
+        test_end = n if k == n_folds - 1 else eval_start + (k + 1) * fold_size
+        val_start = int(test_start * (1 - val_ratio))
+
+        assert 0 <= val_start <= test_start <= test_end <= n, (
+            f"fold {k}: invalid boundaries val_start={val_start} test_start={test_start} "
+            f"test_end={test_end} n={n}"
+        )
+        if dates is not None and val_start > 0 and test_start < test_end:
+            assert dates[val_start - 1] < dates[test_start], (
+                f"fold {k}: train-pool date {dates[val_start - 1]} not before "
+                f"test date {dates[test_start]} -- would leak future data into training"
+            )
+
+        folds.append(
+            SplitData(
+                x_train=x[:val_start],
+                y_train=y[:val_start],
+                x_val=x[val_start:test_start],
+                y_val=y[val_start:test_start],
+                x_test=x[test_start:test_end],
+                y_test=y[test_start:test_end],
+                dates_train=dates[:val_start] if dates is not None else np.array([]),
+                dates_val=dates[val_start:test_start] if dates is not None else np.array([]),
+                dates_test=dates[test_start:test_end] if dates is not None else np.array([]),
+            )
+        )
+    return folds
