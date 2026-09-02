@@ -78,7 +78,16 @@ Each epoch, for every batch:
 
 1. **Forward pass**: GRU takes a 30-day window of the raw return, lagged-return
    channels (`return_lag1/5/10`), the volume z-score, and rolling volatility,
-   and outputs a predicted next-day return.
+   and outputs a predicted next-day return. The output head hard-bounds this
+   prediction: `pred = output_scale * tanh(raw_logit)`, where `output_scale =
+   --output-cap-std / alpha` (default `--output-cap-std 5.0`, i.e. +-5 standard
+   deviations of that symbol's training returns). Previously the head was a
+   plain unbounded `Linear`, and nothing stopped `pred` from drifting to
+   arbitrary magnitude while chasing marginal loss improvement past the point
+   where `tanh(alpha * pred)` in the signal/loss below had already saturated
+   (observed empirically as RMSE blowing up several-fold past the true return
+   scale). The cap makes that structurally impossible instead of relying on
+   `loss_lambda` alone (see step 5) to keep `pred` in a sane range.
 2. **Signal generation (training)**: the model outputs a continuous **position**
    `signal = tanh(alpha * predicted_return)` — a position size between -1 and +1.
    Positive = go long, negative = go short; magnitude scales confidence. This is
@@ -89,16 +98,20 @@ Each epoch, for every batch:
 5. **Loss (profit-aware)**: `-mean(net_profit)` — minimizing loss = maximizing profit:
    `loss = -mean(net_profit)`
    - An **MSE calibration term** `loss_lambda * mean((pred - actual)^2)` is added via
-     `--loss-lambda` (default `0.1`). At `0`, `pred` drifts unbounded and `tanh`
-     saturates, killing the gradient (see `TODO.md`). The default `0.1` pins `pred`
-     to realistic magnitudes so `tanh` never saturates and the model keeps learning —
-     but it also steers the model toward an MSE-like fit and away from the raw profit
-     objective.
+     `--loss-lambda` (default `0.1`). Originally this was the *only* thing keeping
+     `pred` from drifting unbounded and saturating `tanh` (see `TODO.md`); now that
+     the output head is hard-capped (step 1), `loss_lambda` is no longer solely
+     responsible for magnitude control — it still steers the model toward an
+     MSE-like fit within the capped range, pulling it somewhat away from the raw
+     profit objective.
    - The MSE baseline uses just `mean((pred - actual)^2)`.
 6. **Backpropagation**: because the loss uses the smooth `tanh` position, forward
    and backward are the *same* function — there is **no straight-through estimator**
    and no fake gradient. Gradients stay alive for every prediction magnitude.
-7. **Weight update**: Adam optimizer adjusts parameters.
+7. **Weight update**: AdamW optimizer adjusts parameters, with weight decay
+   (`--weight-decay`, default `1e-3`) penalizing large weights directly — an
+   additional, independent brake on runaway prediction magnitude alongside
+   the output cap in step 1 (previously plain `Adam`, no weight decay).
 
 **Evaluation**: during eval, the continuous prediction is discretized to a
 long / flat / short action: `signal = sign(predicted_return)` when
