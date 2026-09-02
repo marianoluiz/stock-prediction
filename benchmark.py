@@ -47,11 +47,28 @@ def buy_and_hold_return(actual_returns: np.ndarray) -> float:
     return float(np.prod(1.0 + actual_returns) - 1.0)
 
 
+def always_short_return(actual_returns: np.ndarray) -> float:
+    """Cumulative return of a naive always-short position over the test window."""
+    return float(np.prod(1.0 - actual_returns) - 1.0)
+
+
+def is_degenerate_signal(signal: np.ndarray) -> bool:
+    """True if the executed signal never changes across the whole test window.
+
+    A model that outputs the same position on every day regardless of input
+    learned no conditional (day-to-day) signal at all -- it's indistinguishable
+    from a naive always-long/always-short baseline, whatever its profit looks
+    like.
+    """
+    return bool(np.unique(signal).size == 1)
+
+
 def run_one(symbol: str, loss_type: str, args: argparse.Namespace, device: torch.device, seed: int) -> dict:
     data = prepare_data(symbol, args.start, args.end, args.sequence_length, args.batch_size)
     split = data.split
 
     alpha = args.alpha if args.alpha is not None else calibrate_alpha(split.y_train)
+    output_scale = (args.output_cap_std / alpha) if args.output_cap_std > 0 else None
 
     torch.manual_seed(seed)
     model = GRUReturnPredictor(
@@ -59,6 +76,7 @@ def run_one(symbol: str, loss_type: str, args: argparse.Namespace, device: torch
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
+        output_scale=output_scale,
     ).to(device)
 
     config = TrainingConfig(
@@ -68,8 +86,12 @@ def run_one(symbol: str, loss_type: str, args: argparse.Namespace, device: torch
         signal_threshold=args.signal_threshold,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
+        weight_decay=args.weight_decay,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        early_stop_patience=args.early_stop_patience,
+        early_stop_min_delta=args.early_stop_min_delta,
+        early_stop_metric=args.early_stop_metric,
     )
 
     fit(model, data.train_loader, data.val_loader, config, device, capital=args.capital)
@@ -83,6 +105,8 @@ def run_one(symbol: str, loss_type: str, args: argparse.Namespace, device: torch
     test_metrics["tier"] = SYMBOL_TIER.get(symbol, "?")
     test_metrics["n_test"] = len(split.x_test)
     test_metrics["buy_hold"] = buy_and_hold_return(test_metrics["actual_np"])
+    test_metrics["always_short"] = always_short_return(test_metrics["actual_np"])
+    test_metrics["degenerate"] = is_degenerate_signal(test_metrics["signal_np"])
     return test_metrics
 
 
@@ -103,6 +127,11 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=1e-3, help="AdamW weight decay; caps pred magnitude from diverging when chasing tanh saturation")
+    parser.add_argument("--output-cap-std", type=float, default=5.0, help="Hard-bound predicted return to +-N std devs of train returns via a tanh head (0 = unbounded)")
+    parser.add_argument("--early-stop-patience", type=int, default=0, help="Stop and restore best-validation-epoch weights if --early-stop-metric doesn't improve for this many epochs (0 = disabled, always use final-epoch weights). Empirically, on this dataset/model, enabling this made results WORSE (higher degenerate-policy rate, lower win rate vs MSE) regardless of metric watched -- see results/benchmark_full_v2 vs v3/v4. The trivial constant-direction solution is an early, flat local minimum; patience-based stopping locks onto it before training escapes it. Left available for further experimentation, but off by default.")
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
+    parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"], help="Validation metric to monitor for early stopping / best-checkpoint selection. Avoid val_profit/val_profit_geo as the default: on a ~300-day val window they're dominated by a handful of large-return days, so a checkpoint that happens to collapse to a constant-direction bet matching the val window's drift can look 'best' by luck and get locked in (verified empirically -- see results/benchmark_full_v3 vs v4).")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=str, default=None, help="Output CSV path (default: results/benchmark_summary_<timestamp>.csv)")
     args = parser.parse_args()
@@ -114,13 +143,15 @@ def main() -> None:
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    print(f"Benchmarking {len(symbols)} symbols x 2 losses: {symbols}\n")
+    print(f"Benchmarking {len(symbols)} symbols x 3 losses: {symbols}\n")
+
+    loss_types = ("mse", "profit-aware", "profit-log")
 
     rows: list[dict] = []
     t_start = time.time()
 
     for i, symbol in enumerate(symbols, 1):
-        for loss_type in ("mse", "profit-aware"):
+        for loss_type in loss_types:
             t0 = time.time()
             try:
                 m = run_one(symbol, loss_type, args, device, seed=args.seed)
@@ -129,24 +160,33 @@ def main() -> None:
                 continue
             dt = time.time() - t0
             rows.append(m)
+            deg_tag = " [DEGENERATE: constant signal]" if m["degenerate"] else ""
             print(
                 f"[{i}/{len(symbols)}] {symbol:10s} ({m['tier']:<6s}) {loss_type:13s} "
                 f"dir_acc={m['directional_acc']:.3f} cum_ret={m['cum_profit']:+.4f} "
                 f"geo_ret={m['cum_profit_geo']:+.4f} sharpe={m['sharpe_like']:+.3f} "
-                f"(buy&hold={m['buy_hold']:+.4f}) [{dt:.1f}s]"
+                f"(buy&hold={m['buy_hold']:+.4f} always_short={m['always_short']:+.4f}) "
+                f"[{dt:.1f}s]{deg_tag}"
             )
 
     total_dt = time.time() - t_start
-    print(f"\nTotal benchmark time: {total_dt:.1f}s\n")
+
+    summary_lines: list[str] = []
+
+    def emit(line: str = "") -> None:
+        print(line)
+        summary_lines.append(line)
+
+    emit(f"\nTotal benchmark time: {total_dt:.1f}s\n")
 
     # --- Aggregate summary -------------------------------------------------
-    print(f"{'='*78}")
-    print("  AGGREGATE SUMMARY (mean across symbols)")
-    print(f"{'='*78}")
+    emit(f"{'='*78}")
+    emit("  AGGREGATE SUMMARY (mean across symbols)")
+    emit(f"{'='*78}")
     header = f"  {'Loss':<15}{'DirAcc':>10}{'CumRet':>12}{'GeoRet':>12}{'Sharpe':>10}{'RMSE':>10}"
-    print(header)
-    print(f"  {'-'*74}")
-    for loss_type in ("mse", "profit-aware"):
+    emit(header)
+    emit(f"  {'-'*74}")
+    for loss_type in loss_types:
         sub = [r for r in rows if r["loss_type"] == loss_type]
         if not sub:
             continue
@@ -155,19 +195,19 @@ def main() -> None:
         geo_ret = np.mean([r["cum_profit_geo"] for r in sub])
         sharpe = np.mean([r["sharpe_like"] for r in sub])
         rmse = np.mean([r["rmse"] for r in sub])
-        print(f"  {loss_type:<15}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
+        emit(f"  {loss_type:<15}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
 
     bh = np.mean([r["buy_hold"] for r in rows if r["loss_type"] == "mse"]) if rows else float("nan")
-    print(f"  {'buy & hold':<15}{'':>10}{bh:>+12.4f}")
+    emit(f"  {'buy & hold':<15}{'':>10}{bh:>+12.4f}")
 
     # --- Per-tier breakdown ---------------------------------------------------
-    print(f"\n{'='*78}")
-    print("  BY TIER (mean across symbols in tier)")
-    print(f"{'='*78}")
-    print(header)
-    print(f"  {'-'*74}")
+    emit(f"\n{'='*78}")
+    emit("  BY TIER (mean across symbols in tier)")
+    emit(f"{'='*78}")
+    emit(header)
+    emit(f"  {'-'*74}")
     for tier in ("strong", "mid", "weak", "index"):
-        for loss_type in ("mse", "profit-aware"):
+        for loss_type in loss_types:
             sub = [r for r in rows if r["tier"] == tier and r["loss_type"] == loss_type]
             if not sub:
                 continue
@@ -177,40 +217,59 @@ def main() -> None:
             sharpe = np.mean([r["sharpe_like"] for r in sub])
             rmse = np.mean([r["rmse"] for r in sub])
             label = f"{tier}/{loss_type}"
-            print(f"  {label:<15}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
-        print()
+            emit(f"  {label:<15}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
+        emit()
 
     # --- Win-rate: profit-aware vs mse, symbol by symbol --------------------
     by_symbol: dict[str, dict[str, dict]] = {}
     for r in rows:
         by_symbol.setdefault(r["symbol"], {})[r["loss_type"]] = r
 
-    wins_geo = wins_sharpe = wins_diracc = n_pairs = 0
-    for symbol, d in by_symbol.items():
-        if "mse" not in d or "profit-aware" not in d:
+    for loss_type in loss_types:
+        if loss_type == "mse":
             continue
-        n_pairs += 1
-        wins_geo += d["profit-aware"]["cum_profit_geo"] > d["mse"]["cum_profit_geo"]
-        wins_sharpe += d["profit-aware"]["sharpe_like"] > d["mse"]["sharpe_like"]
-        wins_diracc += d["profit-aware"]["directional_acc"] > d["mse"]["directional_acc"]
+        wins_geo = wins_sharpe = wins_diracc = n_pairs = 0
+        for symbol, d in by_symbol.items():
+            if "mse" not in d or loss_type not in d:
+                continue
+            n_pairs += 1
+            wins_geo += d[loss_type]["cum_profit_geo"] > d["mse"]["cum_profit_geo"]
+            wins_sharpe += d[loss_type]["sharpe_like"] > d["mse"]["sharpe_like"]
+            wins_diracc += d[loss_type]["directional_acc"] > d["mse"]["directional_acc"]
 
-    print(f"\n  Profit-aware beats MSE on (out of {n_pairs} symbols):")
-    print(f"    Geometric return: {wins_geo}/{n_pairs}")
-    print(f"    Sharpe-like:      {wins_sharpe}/{n_pairs}")
-    print(f"    Directional acc:  {wins_diracc}/{n_pairs}")
+        emit(f"\n  {loss_type} beats MSE on (out of {n_pairs} symbols):")
+        emit(f"    Geometric return: {wins_geo}/{n_pairs}")
+        emit(f"    Sharpe-like:      {wins_sharpe}/{n_pairs}")
+        emit(f"    Directional acc:  {wins_diracc}/{n_pairs}")
 
-    # --- Save CSV ------------------------------------------------------------
+    # --- Degenerate (constant-signal) run count -------------------------------
+    emit(f"\n{'='*78}")
+    emit("  DEGENERATE RUNS (executed signal never changes across the test window)")
+    emit(f"{'='*78}")
+    for loss_type in loss_types:
+        sub = [r for r in rows if r["loss_type"] == loss_type]
+        n_deg = sum(1 for r in sub if r["degenerate"])
+        deg_symbols = [r["symbol"] for r in sub if r["degenerate"]]
+        emit(f"  {loss_type:<15}{n_deg}/{len(sub)}  {deg_symbols}")
+
+    # --- Save per-symbol CSV --------------------------------------------------
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
-        f.write("symbol,tier,loss_type,n_test,directional_acc,cum_profit,cum_profit_geo,sharpe_like,mse,mae,rmse,buy_hold\n")
+        f.write("symbol,tier,loss_type,n_test,directional_acc,cum_profit,cum_profit_geo,sharpe_like,mse,mae,rmse,buy_hold,always_short,degenerate\n")
         for r in rows:
             f.write(
                 f"{r['symbol']},{r['tier']},{r['loss_type']},{r['n_test']},{r['directional_acc']:.6f},"
                 f"{r['cum_profit']:.6f},{r['cum_profit_geo']:.6f},{r['sharpe_like']:.6f},"
-                f"{r['mse']:.8f},{r['mae']:.8f},{r['rmse']:.8f},{r['buy_hold']:.6f}\n"
+                f"{r['mse']:.8f},{r['mae']:.8f},{r['rmse']:.8f},{r['buy_hold']:.6f},"
+                f"{r['always_short']:.6f},{r['degenerate']}\n"
             )
     print(f"\nSaved per-symbol results to {out_path}")
+
+    # --- Save aggregate/tier/win-rate summary ---------------------------------
+    summary_path = out_path.with_name(out_path.stem + "_summary.txt")
+    summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    print(f"Saved aggregate summary to {summary_path}")
 
 
 if __name__ == "__main__":

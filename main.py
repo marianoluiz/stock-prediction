@@ -25,11 +25,13 @@ def run_single(
     show_trade_log: bool = False,
 ) -> tuple[dict, dict]:
     """Train one model with the given loss type and return (history, test_metrics)."""
+    output_scale = (args.output_cap_std / args.alpha) if args.output_cap_std > 0 else None
     model = GRUReturnPredictor(
         input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
+        output_scale=output_scale,
     ).to(device)
 
     config = TrainingConfig(
@@ -39,6 +41,7 @@ def run_single(
         signal_threshold=args.signal_threshold,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
+        weight_decay=args.weight_decay,
         batch_size=args.batch_size,
         epochs=args.epochs,
         early_stop_patience=args.early_stop_patience,
@@ -125,8 +128,8 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.2,              help="Dropout rate between GRU layers (regularization)")
 
     # Trading / Loss
-    parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
-                        help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
+    parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware", "profit-log"],
+                        help="Loss function: 'mse' (baseline), 'profit-aware' (additive P&L), or 'profit-log' (Kelly-style log-return, matches geometric-return metric)")
     parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
     parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
     parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
@@ -139,6 +142,8 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=50,                  help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size")
     parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
+    parser.add_argument("--weight-decay", type=float, default=1e-3,        help="AdamW weight decay; caps pred magnitude from diverging when chasing tanh saturation")
+    parser.add_argument("--output-cap-std", type=float, default=5.0,       help="Hard-bound predicted return to +-N std devs of train returns via a tanh head (0 = unbounded)")
     parser.add_argument("--early-stop-patience", type=int, default=0,      help="Stop training if --early-stop-metric doesn't improve for this many epochs (0 = disabled, train the full --epochs). Restores the best-epoch weights before saving.")
     parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
     parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"],

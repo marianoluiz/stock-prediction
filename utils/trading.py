@@ -99,14 +99,26 @@ def profit_aware_loss(
     alpha: float,
     transaction_cost_rate: float = 0.001,
     previous_signal: torch.Tensor | float | None = None,
+    log_return: bool = False,
 ) -> torch.Tensor:
     """Loss = -mean(pos_t * return_t - cost_t) over a smooth tanh position.
 
     ``pos = tanh(alpha * r_hat)`` is a continuous position size in (-1, 1), so
     gradients flow for every prediction magnitude (no saturation). Transaction
     costs apply to any position change, including fractional sizing changes.
+
+    If ``log_return`` is set, the loss instead maximizes mean log-return
+    (``-mean(log(1 + pos_t * return_t - cost_t))``), i.e. Kelly-style
+    terminal geometric wealth. This matches ``cumulative_profit_geometric``
+    (the compounding metric actually reported) rather than additive P&L, and
+    its concavity punishes full-size wrong-direction bets far harder than the
+    additive loss does, so it discourages saturating ``pos`` to +-1 on
+    low-confidence predictions instead of relying on an MSE term to do so.
     """
 
     pos = smooth_signal(predicted_return, alpha)
     profit = profit_per_step(pos, actual_return, previous_signal, transaction_cost_rate)
+    if log_return:
+        net_return = torch.clamp(profit, min=-0.999)
+        return -torch.log1p(net_return).mean()
     return -profit.mean()
