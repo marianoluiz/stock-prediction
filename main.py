@@ -38,7 +38,6 @@ def run_single(
         loss_type=loss_type,
         alpha=args.alpha,
         loss_lambda=args.loss_lambda,
-        signal_threshold=args.signal_threshold,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
@@ -64,7 +63,6 @@ def run_single(
         args.transaction_cost,
         device,
         loss_type=loss_type,
-        signal_threshold=args.signal_threshold,
     )
 
     print(f"\nTest Metrics [{label}] ({format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])})")
@@ -134,7 +132,6 @@ def main() -> None:
     parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
     parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
     parser.add_argument("--loss-lambda", type=float, default=0.1,          help="Weight of the MSE calibration term in the profit-aware loss (0 = pure profit, larger = more calibration; 0 lets pred drift unbounded and saturate tanh, see TODO.md)")
-    parser.add_argument("--signal-threshold", type=float, default=0.0,     help="Minimum |tanh(alpha*pred)| confidence required to take a position; below it the executed signal is flat (0) instead of always full sign(pred)")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display (default: 100,000)")
 

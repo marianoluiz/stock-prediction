@@ -73,14 +73,21 @@ def always_short_return(actual_returns: np.ndarray) -> float:
 
 
 def is_degenerate_signal(signal: np.ndarray) -> bool:
-    """True if the executed signal never changes across the whole test window.
+    """True if the executed signal never crosses zero across the whole test window.
 
-    A model that outputs the same position on every day regardless of input
-    learned no conditional (day-to-day) signal at all -- it's indistinguishable
-    from a naive always-long/always-short baseline, whatever its profit looks
-    like.
+    The signal is now the continuous tanh(alpha*pred) position, so exact-value
+    repeats are essentially impossible -- what matters is whether the model
+    ever changes its *side* of the market. A model that stays the same sign
+    (or sits exactly at 0) the entire window learned no conditional
+    (day-to-day) signal at all -- it's indistinguishable from a naive
+    always-long/always-short/never-traded baseline, whatever its profit
+    looks like.
     """
-    return bool(np.unique(signal).size == 1)
+    signs = np.sign(signal)
+    nonzero_signs = signs[signs != 0]
+    if nonzero_signs.size == 0:
+        return True
+    return bool(np.unique(nonzero_signs).size == 1)
 
 
 def run_one_split(
@@ -117,7 +124,6 @@ def run_one_split(
         loss_type=loss_type,
         alpha=alpha,
         loss_lambda=args.loss_lambda,
-        signal_threshold=args.signal_threshold,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
@@ -132,7 +138,7 @@ def run_one_split(
 
     test_metrics = run_epoch(
         model, test_loader, None, alpha, args.transaction_cost, device,
-        loss_type=loss_type, signal_threshold=args.signal_threshold,
+        loss_type=loss_type,
     )
     test_metrics["symbol"] = symbol
     test_metrics["loss_type"] = loss_type
@@ -181,7 +187,6 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--alpha", type=float, default=None)
     parser.add_argument("--loss-lambda", type=float, default=0.1)
-    parser.add_argument("--signal-threshold", type=float, default=0.0)
     parser.add_argument("--transaction-cost", type=float, default=0.001)
     parser.add_argument("--capital", type=float, default=100_000.0)
     parser.add_argument("--epochs", type=int, default=50)

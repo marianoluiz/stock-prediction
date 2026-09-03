@@ -113,16 +113,13 @@ Each epoch, for every batch:
    additional, independent brake on runaway prediction magnitude alongside
    the output cap in step 1 (previously plain `Adam`, no weight decay).
 
-**Evaluation**: during eval, the continuous prediction is discretized to a
-long / flat / short action: `signal = sign(predicted_return)` when
-`|tanh(alpha * predicted_return)| >= --signal-threshold`, else `0` (flat). At
-the default `--signal-threshold 0.0` this is always full `sign(predicted_return)`
-(no flat state, the original rule). Raising the threshold sits out low-confidence
-predictions instead of always taking a full ±1 position, which also cuts
-transaction-cost churn on those days. This is the signal fed to the profit
-metrics (`directional_accuracy` compares `sign(pred)` to `sign(actual)`
-directly and is unaffected by the threshold). So training optimizes a smooth
-partial position, while reported profit uses this discrete action rule.
+**Evaluation**: eval reuses the exact same continuous position as training --
+`signal = tanh(alpha * predicted_return)`, magnitude and all -- rather than
+discretizing to a fixed-size long/flat/short action. This is the signal fed to
+the profit metrics (`directional_accuracy` compares `sign(pred)` to
+`sign(actual)` directly and is unaffected by this). So training and evaluation
+optimize and report the exact same objective, with no separate decision rule
+in between: the model's own confidence *is* the position size, both times.
 
 Repeated for all batches across all epochs. Model weights saved to `results/gru_profit_aware.pt`. Loss and profit curves saved as PNGs to `results/`.
 

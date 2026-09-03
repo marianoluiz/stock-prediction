@@ -39,7 +39,6 @@ def main() -> None:
                         help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
     parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
     parser.add_argument("--loss-lambda", type=float, default=0.1,          help="Weight of the MSE calibration term in the profit-aware loss (0 = pure profit, larger = more calibration; 0 lets pred drift unbounded and saturate tanh, see TODO.md)")
-    parser.add_argument("--signal-threshold", type=float, default=0.0,     help="Minimum |tanh(alpha*pred)| confidence required to take a position; below it the executed signal is flat (0) instead of always full sign(pred)")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
 
@@ -82,7 +81,6 @@ def main() -> None:
         loss_type=args.loss,
         alpha=args.alpha,
         loss_lambda=args.loss_lambda,
-        signal_threshold=args.signal_threshold,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
         batch_size=args.batch_size,
