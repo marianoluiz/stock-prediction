@@ -199,16 +199,19 @@ def main() -> None:
     parser.add_argument("--eval-fraction", type=float, default=0.30, help="Fraction of each symbol's sequence reserved as the walk-forward evaluation region, split into --folds contiguous test chunks (only used with --walk-forward; with the defaults, fold 0's train/val boundary matches the single-split train_ratio=0.70 default)")
     args = parser.parse_args()
 
-    if args.output is None:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output = f"results/benchmark_summary_{stamp}.csv"
-
     if args.symbols is not None:
         symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        market_tag = "custom"
     elif args.market == "all":
         symbols = [s for m in MARKETS.values() for tier in m.values() for s in tier]
+        market_tag = "all"
     else:
         symbols = [s for tier in MARKETS[args.market].values() for s in tier]
+        market_tag = args.market
+
+    if args.output is None:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.output = f"results/benchmark_summary_{market_tag}_{stamp}.csv"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     if args.walk_forward:
