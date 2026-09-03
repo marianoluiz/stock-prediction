@@ -30,11 +30,11 @@ from utils.trading import calibrate_alpha
 
 TIERED_SYMBOLS = {
     # persistent uptrend, model's easy case
-    "strong": ["NVDA", "AAPL", "MSFT", "LLY", "COST", "AVGO", "V"],
+    "strong": ["NVDA", "MSFT", "AAPL", "COST", "V", "AVGO"],
     # choppy / sideways / mixed years, the realistic case
-    "mid": ["GOOGL", "JPM", "DIS", "KO", "JNJ", "AMZN", "WMT"],
-    # multi-year decline or high downside volatility, stress test
-    "weak": ["INTC", "F", "KHC", "BA", "T", "PARA", "GRAB"],
+    "mid": ["DIS", "KO", "JNJ", "XOM", "PFE", "WMT"],
+    # multi-year decline, downtrend only (no volatility whipsaws), stress test
+    "weak": ["T", "KHC", "F", "PYPL", "BA", "WBA"],
     # passive-index references, not scored as a performance tier
     "index": ["SPY", "PSEI.PS"],
 }
