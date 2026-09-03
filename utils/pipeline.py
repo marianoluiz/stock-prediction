@@ -49,7 +49,8 @@ class WalkForwardFold:
 
 def cache_path_for(symbol: str, start: str, end: str | None) -> str:
     """Return the CSV cache path for the given data arguments."""
-    return str(Path("data") / f"{symbol}_{start}_{end or 'latest'}.csv")
+    safe_symbol = symbol.replace(":", "-")
+    return str(Path("data") / f"{safe_symbol}_{start}_{end or 'latest'}.csv")
 
 
 def build_sequences(

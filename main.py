@@ -128,8 +128,8 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.2,              help="Dropout rate between GRU layers (regularization)")
 
     # Trading / Loss
-    parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware", "profit-log"],
-                        help="Loss function: 'mse' (baseline), 'profit-aware' (additive P&L), or 'profit-log' (Kelly-style log-return, matches geometric-return metric)")
+    parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
+                        help="Loss function: 'mse' (baseline) or 'profit-aware' (additive P&L)")
     parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
     parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
     parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")

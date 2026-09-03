@@ -49,15 +49,60 @@ def _normalize_price_frame(df: pd.DataFrame, symbol: str | None = None) -> pd.Da
     return data.dropna(how="any")
 
 
-def load_stock_data(symbol: str, start: str, end: str | None = None, cache_path: str | None = None) -> pd.DataFrame:
-    """Load stock OHLCV data from Yahoo Finance with local CSV caching.
+def _normalize_tv_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a tvDatafeed OHLCV frame into the same shape as yfinance's."""
 
-    Downloads the data via yfinance if no cache exists, otherwise reads from
-    the CSV file at ``cache_path``.  The result is always normalized to a flat
-    numeric DataFrame indexed by ``Date``.
+    data = df.copy()
+    data = data.drop(columns=["symbol"], errors="ignore")
+    data = data.rename(columns={
+        "open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume",
+    })
+    data.index = pd.to_datetime(data.index, errors="coerce").tz_localize(None).normalize()
+    data.index.name = "Date"
+    data = data.loc[~data.index.isna()]
+
+    for col in data.columns:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    return data.dropna(how="any")
+
+
+def _load_stock_data_tv(symbol: str, exchange: str, start: str, end: str | None) -> pd.DataFrame:
+    """Load OHLCV data from TradingView via tvDatafeed (unofficial, reverse-engineered
+    client hitting TradingView's internal endpoints -- not a documented API. Used for
+    exchanges yfinance doesn't cover, e.g. PSE. TradingView serves at most 5000 bars
+    per request rather than an arbitrary date range, so we pull the max and trim.
+    """
+    from tvDatafeed import Interval, TvDatafeed
+
+    tv = TvDatafeed()
+    df = tv.get_hist(symbol=symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
+
+    if df is None or df.empty:
+        raise ValueError(f"No data downloaded for symbol={exchange}:{symbol}")
+
+    df = _normalize_tv_frame(df)
+
+    if start:
+        df = df.loc[df.index >= pd.to_datetime(start)]
+    if end:
+        df = df.loc[df.index <= pd.to_datetime(end)]
+
+    return df
+
+
+def load_stock_data(symbol: str, start: str, end: str | None = None, cache_path: str | None = None) -> pd.DataFrame:
+    """Load stock OHLCV data with local CSV caching.
+
+    Downloads via yfinance if no cache exists, otherwise reads from the CSV
+    file at ``cache_path``.  Symbols written as ``"EXCHANGE:TICKER"`` (e.g.
+    ``"PSE:JFC"``) are instead routed to TradingView via ``tvDatafeed``, for
+    exchanges (like the PSE) yfinance doesn't carry.  The result is always
+    normalized to a flat numeric DataFrame indexed by ``Date``.
 
     Args:
-        symbol:   Ticker symbol (e.g. ``"AAPL"``).
+        symbol:   Ticker symbol (e.g. ``"AAPL"``), or ``"EXCHANGE:TICKER"``
+                  (e.g. ``"PSE:JFC"``) to fetch from TradingView instead.
         start:    Start date string (``"YYYY-MM-DD"``).
         end:      End date string, or ``None`` for the latest available data.
         cache_path: File path for the CSV cache.  If ``None`` no caching is
@@ -67,18 +112,22 @@ def load_stock_data(symbol: str, start: str, end: str | None = None, cache_path:
         A clean OHLCV DataFrame indexed by ``pd.DatetimeIndex``.
 
     Raises:
-        ValueError: If yfinance returns an empty DataFrame.
+        ValueError: If the data source returns no rows for the symbol.
     """
     if cache_path and Path(cache_path).exists():
         cached = pd.read_csv(cache_path, parse_dates=["Date"])
         return _normalize_price_frame(cached, symbol=symbol)
 
-    df = yf.download(symbol, start=start, end=end, progress=False)
+    if ":" in symbol:
+        exchange, ticker = symbol.split(":", 1)
+        df = _load_stock_data_tv(ticker, exchange, start, end)
+    else:
+        df = yf.download(symbol, start=start, end=end, progress=False)
 
-    if df.empty:
-        raise ValueError(f"No data downloaded for symbol={symbol}")
-    
-    df = _normalize_price_frame(df, symbol=symbol)
+        if df.empty:
+            raise ValueError(f"No data downloaded for symbol={symbol}")
+
+        df = _normalize_price_frame(df, symbol=symbol)
 
     if cache_path:
         Path(cache_path).parent.mkdir(parents=True, exist_ok=True)

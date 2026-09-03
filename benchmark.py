@@ -11,6 +11,8 @@ stock's full artifacts (weights + curves).
 Usage:
     python benchmark.py
     python benchmark.py --symbols AAPL,MSFT,NVDA --epochs 30
+    python benchmark.py --market ph      # PSE tickers, via tvDatafeed
+    python benchmark.py --market all     # US + PH combined
 """
 
 from __future__ import annotations
@@ -34,12 +36,30 @@ TIERED_SYMBOLS = {
     # choppy / sideways / mixed years, the realistic case
     "mid": ["DIS", "KO", "JNJ", "XOM", "PFE", "WMT"],
     # multi-year decline, downtrend only (no volatility whipsaws), stress test
-    "weak": ["T", "KHC", "F", "PYPL", "BA", "WBA"],
-    # passive-index references, not scored as a performance tier
-    "index": ["SPY", "PSEI.PS"],
+    "weak": ["T", "KHC", "F", "PYPL", "BA", "NKE"],
+    # passive-index reference, not scored as a performance tier
+    "index": ["SPY"],
 }
+
+# PH tickers use tvDatafeed's "EXCHANGE:TICKER" convention (routed off yfinance
+# in utils.preprocessing.load_stock_data) since yfinance doesn't carry the PSE.
+# Tiered by total return since listing rather than trend shape -- PSE tickers
+# don't have the multi-decade uptrend/downtrend history the US ones do.
+PH_TIERED_SYMBOLS = {
+    "strong": ["PSE:ICT"],
+    "mid": ["PSE:CNPF", "PSE:AREIT", "PSE:MER", "PSE:BPI", "PSE:BDO", "PSE:GLO", "PSE:PGOLD"],
+    "weak": ["PSE:TEL", "PSE:MBT", "PSE:SM", "PSE:AEV", "PSE:SMPH", "PSE:EW", "PSE:MEG", "PSE:URC", "PSE:ALI"],
+    "index": ["PSE:PSEI"],
+}
+
+MARKETS = {"us": TIERED_SYMBOLS, "ph": PH_TIERED_SYMBOLS}
 DEFAULT_SYMBOLS = [s for tier in TIERED_SYMBOLS.values() for s in tier]
-SYMBOL_TIER = {s: tier for tier, symbols in TIERED_SYMBOLS.items() for s in symbols}
+SYMBOL_TIER = {
+    s: tier
+    for symbol_set in (TIERED_SYMBOLS, PH_TIERED_SYMBOLS)
+    for tier, symbols in symbol_set.items()
+    for s in symbols
+}
 
 
 def buy_and_hold_return(actual_returns: np.ndarray) -> float:
@@ -151,7 +171,8 @@ def run_one_walk_forward(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark MSE vs profit-aware GRU across many stocks")
-    parser.add_argument("--symbols", type=str, default=",".join(DEFAULT_SYMBOLS), help="Comma-separated ticker list")
+    parser.add_argument("--symbols", type=str, default=None, help="Comma-separated ticker list (overrides --market)")
+    parser.add_argument("--market", type=str, default="us", choices=["us", "ph", "all"], help="Symbol universe to use when --symbols is not given")
     parser.add_argument("--start", type=str, default="2018-01-01")
     parser.add_argument("--end", type=str, default=None)
     parser.add_argument("--sequence-length", type=int, default=30)
@@ -182,14 +203,18 @@ def main() -> None:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         args.output = f"results/benchmark_summary_{stamp}.csv"
 
-    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    if args.symbols is not None:
+        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    elif args.market == "all":
+        symbols = [s for m in MARKETS.values() for tier in m.values() for s in tier]
+    else:
+        symbols = [s for tier in MARKETS[args.market].values() for s in tier]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     if args.walk_forward:
         print(f"Walk-forward mode: {args.folds} expanding-window folds, eval_fraction={args.eval_fraction}")
-    print(f"Benchmarking {len(symbols)} symbols x 3 losses: {symbols}\n")
-
-    loss_types = ("mse", "profit-aware", "profit-log")
+    loss_types = ("mse", "profit-aware")
+    print(f"Benchmarking {len(symbols)} symbols x {len(loss_types)} losses: {symbols}\n")
 
     rows: list[dict] = []
     t_start = time.time()
@@ -270,7 +295,7 @@ def main() -> None:
             emit(f"  {label:<15}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
         emit()
 
-    # --- Win-rate: profit-aware/profit-log vs mse -----------------------------
+    # --- Win-rate: profit-aware vs mse -----------------------------------------
     # by_symbol groups a symbol's rows by loss_type (1 row/loss in legacy mode,
     # `folds` rows/loss in walk-forward mode); by_symbol_fold groups by
     # (symbol, fold) so a walk-forward run can also report a pooled,

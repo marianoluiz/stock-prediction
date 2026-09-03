@@ -74,8 +74,8 @@ def run_epoch(
         alpha:  Scaling factor for the trading signal.
         transaction_cost_rate:  Fractional cost per trade.
         device: Target device for tensors.
-        loss_type: ``"mse"`` for baseline, ``"profit-aware"`` for the additive
-            P&L loss, or ``"profit-log"`` for the Kelly-style log-return loss.
+        loss_type: ``"mse"`` for baseline, or ``"profit-aware"`` for the
+            additive P&L loss.
         loss_lambda: Weight of the MSE calibration term added to the custom
             profit-aware loss (ignored when ``loss_type == "mse"``).
         signal_threshold: Minimum ``|tanh(alpha * pred)|`` confidence required
@@ -104,15 +104,6 @@ def run_epoch(
             pred = model(x_batch)
             if loss_type == "mse":
                 loss = F.mse_loss(pred, y_batch)
-            elif loss_type == "profit-log":
-                loss = profit_aware_loss(
-                    pred,
-                    y_batch,
-                    alpha,
-                    transaction_cost_rate=transaction_cost_rate,
-                    previous_signal=previous_signal,
-                    log_return=True,
-                )
             else:
                 profit_loss = profit_aware_loss(
                     pred,
