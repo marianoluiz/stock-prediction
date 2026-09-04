@@ -15,6 +15,8 @@ from models.gru_model import GRUReturnPredictor
 from training.train import run_epoch
 from utils.metrics import trade_log
 from utils.pipeline import prepare_data
+from utils.plotting import format_date
+from utils.trading import calibrate_alpha
 
 
 def main() -> None:
@@ -37,11 +39,13 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.2,              help="Dropout rate between GRU layers")
 
     # Trading / Display
-    parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal")
+    parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
+    parser.add_argument("--loss-lambda", type=float, default=0.1,          help="Weight of the MSE calibration term in the profit-aware loss (0 lets pred drift unbounded and saturate tanh)")
     parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size for evaluation")
     parser.add_argument("--trade-log", action="store_true",                help="Print a per-trade P&L log for every test trade")
+    parser.add_argument("--metrics-out", type=str, default=None,            help="Optional path to write a text summary of the metrics")
     args = parser.parse_args()
 
     model_path = Path(args.model)
@@ -54,10 +58,15 @@ def main() -> None:
     data = prepare_data(args.symbol, args.start, args.end, args.sequence_length, args.batch_size)
     split = data.split
 
-    print(f"Test period: {split.dates_test[0]} -> {split.dates_test[-1]} ({len(split.x_test)} samples)")
+    if args.alpha is None:
+        args.alpha = calibrate_alpha(split.y_train)
+        print(f"Auto-calibrated alpha: {args.alpha:.4f} (train return std = {split.y_train.std():.6f})")
+
+    end_actual = format_date(data.dates[-1])
+    print(f"Test period: {format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])} ({len(split.x_test)} samples)")
 
     model = GRUReturnPredictor(
-        input_size=1,
+        input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
@@ -75,6 +84,7 @@ def main() -> None:
         args.transaction_cost,
         device,
         loss_type=args.loss,
+        loss_lambda=args.loss_lambda,
     )
 
     print(f"  Loss:                {test_metrics['loss']:.6f}")
@@ -98,6 +108,29 @@ def main() -> None:
             args.capital,
             transaction_cost_rate=args.transaction_cost,
         )
+
+    if args.metrics_out:
+        out = Path(args.metrics_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        body = (
+            f"Symbol:         {args.symbol}\n"
+            f"Reporting period: {args.start} -> {end_actual}\n"
+            f"Model:          {model_path}\n"
+            f"Loss:           {args.loss}\n"
+            f"Test period:    {format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])} "
+            f"({len(split.x_test)} samples)\n"
+            f"\n"
+            f"Loss:                  {test_metrics['loss']:.6f}\n"
+            f"MSE:                   {test_metrics['mse']:.8f}\n"
+            f"MAE:                   {test_metrics['mae']:.8f}\n"
+            f"RMSE:                  {test_metrics['rmse']:.8f}\n"
+            f"Directional Accuracy:  {test_metrics['directional_acc']:.4f}\n"
+            f"Cumulative Return:     {test_metrics['cum_profit']:.6f} ({test_metrics['cum_profit'] * args.capital:+,.2f} PHP)\n"
+            f"Geometric Return:      {test_metrics['cum_profit_geo']:.6f} ({test_metrics['cum_profit_geo'] * args.capital:+,.2f} PHP)\n"
+            f"Sharpe-like Ratio:     {test_metrics['sharpe_like']:.4f}\n"
+        )
+        out.write_text(body, encoding="utf-8")
+        print(f"\nSaved metrics to {out}")
 
 
 if __name__ == "__main__":

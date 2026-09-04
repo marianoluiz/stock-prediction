@@ -3,5 +3,7 @@ torch
 pandas
 numpy
 yfinance
+tvdatafeed-enhanced
+websocket-client
 matplotlib
 scikit-learn

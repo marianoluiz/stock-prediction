@@ -12,6 +12,9 @@ This project implements your thesis idea:
 
    Loss = -(1 / N) * sum(profit_t)
 
+See [docs/algorithm.md](docs/algorithm.md) for the full original thesis
+algorithm (Steps 0-11) this project implements.
+
 ## Return Metrics
 
 The evaluation tracks two types of cumulative returns:
@@ -71,11 +74,15 @@ Example:
 
 `python main.py --compare --epochs 50`
 
-Artifacts are saved in [results](results):
+Artifacts are saved in [results](results). Models and curves are named with the
+stock symbol + date range, e.g. for `AAPL` trained `2018-01-01` to the latest
+date (`2026-08-17`):
 
-- trained model (`gru_profit_aware.pt` or `gru_mse.pt`)
-- loss curve (`loss_curve.png`)
-- profit curve (`profit_curve.png`)
+- trained model (`results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`)
+- loss curve (`AAPL_profit_aware_2018-01-01_2026-08-17_loss_curve.png`)
+- profit curve (`AAPL_profit_aware_2018-01-01_2026-08-17_profit_curve.png`)
+
+Graph titles show the symbol, the date range, and the train/val/test split.
 
 ## After the main run: train, evaluate, and predict separately
 
@@ -103,23 +110,23 @@ python train.py --loss mse
 
 ### 2. Evaluate (reload a saved model, no retraining)
 
-`python evaluate.py --model results/profit_aware/gru_profit_aware.pt`
+`python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
 
 This rebuilds the identical chronological split, loads the saved weights, and
 prints the test-set metrics (directional accuracy, cumulative/geometric
 return, Sharpe-like ratio) for exactly the same window the model never saw.
 
 ```bash
-# MSE model + full per-trade log
-python evaluate.py --model results/mse/gru_mse.pt --loss mse --trade-log
+# MSE model + full per-trade log + save a metrics summary
+python evaluate.py --model results/mse/AAPL_mse_2018-01-01_2026-08-17.pt --loss mse --trade-log --metrics-out results/mse/AAPL_mse_metrics.txt
 
 # Evaluate the AAPL model on a different ticker's test window
-python evaluate.py --model results/profit_aware/gru_profit_aware.pt --symbol GOOGL --capital 50000
+python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt --symbol GOOGL --capital 50000
 ```
 
 ### 3. Predict (live forecast for a defense demo)
 
-`python predict.py --model results/profit_aware/gru_profit_aware.pt`
+`python predict.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
 
 Seeds the model with the last 30 returns, then forecasts the next 5 trading
 days (default), feeding each prediction back as input.
@@ -132,10 +139,12 @@ python predict.py --model models/nvda_pa.pt --symbol NVDA --days 10
 ### Typical workflow
 
 1. `python train.py --symbol AAPL --loss mse` and `python train.py --symbol AAPL --loss profit-aware`
-2. `python evaluate.py --model results/mse/gru_mse.pt --loss mse`
-3. `python evaluate.py --model results/profit_aware/gru_profit_aware.pt`
+2. `python evaluate.py --model results/mse/AAPL_mse_2018-01-01_2026-08-17.pt --loss mse`
+3. `python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
 4. Compare the two metric tables in your thesis write-up.
-5. `python predict.py --model results/profit_aware/gru_profit_aware.pt` for the live demo.
+5. `python predict.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt` for the live demo.
+6. `python main.py --loss mse --trade-log --symbol spy`
+7. `python main.py --loss profit-aware --trade-log --symbol spy`
 
 > `main.py --compare` still exists as a shortcut that trains both losses in one
 > run and prints a side-by-side comparison table.

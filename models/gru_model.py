@@ -9,8 +9,22 @@ class GRUReturnPredictor(nn.Module):
         hidden_size: int = 64,
         num_layers: int = 2,
         dropout: float = 0.2,
+        output_scale: float | None = None,
     ) -> None:
+        """
+        output_scale: if set, the predicted return is ``output_scale *
+            tanh(raw_logit)``, hard-bounding predictions to
+            ``(-output_scale, output_scale)``. Without this, a plain
+            ``Linear`` head is unbounded, and a saturating trading-signal
+            loss (e.g. ``tanh(alpha * pred)``) has no incentive to keep
+            ``pred`` near the actual return scale — nothing stops the raw
+            logit from diverging as it chases marginal reward past the
+            saturation point. Pass ``output_scale`` ~ a few std devs of the
+            training return series (e.g. via ``calibrate_alpha``) to keep
+            predictions on a sane scale regardless of loss shape.
+        """
         super().__init__()
+        self.output_scale = output_scale
         self.gru = nn.GRU(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -34,5 +48,7 @@ class GRUReturnPredictor(nn.Module):
                 raise ValueError(f"Expected input with shape [batch, seq, features], got {tuple(x.shape)}")
         out, _ = self.gru(x)
         last_hidden = out[:, -1, :]  # [batch, hidden_size]
-        pred_return = self.head(last_hidden).squeeze(-1)  # [batch]
-        return pred_return
+        raw = self.head(last_hidden).squeeze(-1)  # [batch]
+        if self.output_scale is not None:
+            return self.output_scale * torch.tanh(raw)
+        return raw

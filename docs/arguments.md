@@ -44,6 +44,7 @@ the test window is identical between them.
 | `--loss` | `str` | `profit-aware` | Loss function: `mse` (baseline) or `profit-aware` (custom). |
 | `--compare` | flag | `False` | Run both loss functions and print a side-by-side comparison table. |
 | `--alpha` | `float` | `1.0` | Sharpness of tanh signal: higher = more aggressive binary-like positioning. |
+| `--loss-lambda` | `float` | `0.0` | Weight of the MSE calibration term added to the profit-aware loss. `0` (default) = pure profit loss `-mean(net_profit)`. Larger values add MSE calibration, which prevents gradient saturation but steers the model toward an MSE-like fit. |
 | `--transaction-cost` | `float` | `0.001` | Simulated trading cost per trade as a rate (0.001 = 0.1%). |
 | `--capital` | `float` | `100000.0` | Starting capital in PHP for simulated trading display. Converts percentage returns to PHP amounts in output. |
 
@@ -83,14 +84,15 @@ python main.py --symbol GOOGL --hidden-size 128 --num-layers 3 --epochs 100
 
 ### train.py — train only, save a model
 
+Models and curves are named with the symbol + date range (the actual last date
+is filled in automatically, e.g. `AAPL_profit_aware_2018-01-01_2026-08-17`):
+
 ```bash
-# Train the default profit-aware model (saves to results/profit_aware/)
+# Train the default profit-aware model
+#   saves to results/profit_aware/AAPL_profit_aware_2018-01-01_<END>.pt
 python train.py
 
-# Train an MSE baseline with a custom save path
-python train.py --loss mse --save results/mse/gru_mse.pt
-
-# Custom training run
+# Custom save path (curves still go next to it, named with symbol + range)
 python train.py --symbol NVDA --hidden-size 128 --epochs 100 --save models/nvda_pa.pt
 ```
 
@@ -98,13 +100,13 @@ python train.py --symbol NVDA --hidden-size 128 --epochs 100 --save models/nvda_
 
 ```bash
 # Evaluate the default profit-aware model on AAPL's test window
-python evaluate.py --model results/profit_aware/gru_profit_aware.pt
+python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt
 
-# Evaluate an MSE baseline with a trade log
-python evaluate.py --model results/mse/gru_mse.pt --loss mse --trade-log
+# Evaluate an MSE baseline with a trade log + save a metrics summary file
+python evaluate.py --model results/mse/AAPL_mse_2018-01-01_2026-08-17.pt --loss mse --trade-log --metrics-out results/mse/AAPL_mse_metrics.txt
 
 # Evaluate on a different ticker (uses that ticker's test window)
-python evaluate.py --model results/profit_aware/gru_profit_aware.pt --symbol GOOGL --capital 50000
+python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt --symbol GOOGL --capital 50000
 ```
 
 ### predict.py — forecast the next N days (defense demo)

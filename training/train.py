@@ -7,6 +7,7 @@ accuracy, and a Sharpe-like metric.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -24,7 +25,7 @@ from utils.metrics import (
     root_mean_squared_error,
     sharpe_like,
 )
-from utils.trading import profit_aware_loss
+from utils.trading import profit_aware_loss, smooth_signal
 
 
 @dataclass
@@ -33,10 +34,15 @@ class TrainingConfig:
 
     loss_type: str = "profit-aware"
     alpha: float = 1.0
+    loss_lambda: float = 0.1
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
+    weight_decay: float = 0.0
     batch_size: int = 64
     epochs: int = 50
+    early_stop_patience: int = 0
+    early_stop_min_delta: float = 0.0
+    early_stop_metric: str = "val_loss"
 
 
 def to_loader(x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) -> DataLoader:
@@ -55,6 +61,7 @@ def run_epoch(
     transaction_cost_rate: float,
     device: torch.device,
     loss_type: str = "profit-aware",
+    loss_lambda: float = 1.0,
     ) -> Dict[str, float]:
     """Run one training or evaluation epoch.
 
@@ -65,7 +72,10 @@ def run_epoch(
         alpha:  Scaling factor for the trading signal.
         transaction_cost_rate:  Fractional cost per trade.
         device: Target device for tensors.
-        loss_type: ``"mse"`` for baseline or ``"profit-aware"`` for custom loss.
+        loss_type: ``"mse"`` for baseline, or ``"profit-aware"`` for the
+            additive P&L loss.
+        loss_lambda: Weight of the MSE calibration term added to the custom
+            profit-aware loss (ignored when ``loss_type == "mse"``).
 
     Returns:
         Dictionary of aggregated metrics: ``loss``, ``directional_acc``,
@@ -90,20 +100,21 @@ def run_epoch(
             if loss_type == "mse":
                 loss = F.mse_loss(pred, y_batch)
             else:
-                loss = profit_aware_loss(
+                profit_loss = profit_aware_loss(
                     pred,
                     y_batch,
                     alpha,
                     transaction_cost_rate=transaction_cost_rate,
                     previous_signal=previous_signal,
                 )
+                loss = profit_loss + loss_lambda * F.mse_loss(pred, y_batch)
 
             if is_train:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
 
-            signal = torch.sign(pred)
+            signal = smooth_signal(pred, alpha)
             if previous_signal is None:
                 prev_signal = torch.zeros(1, device=device, dtype=signal.dtype)
             else:
@@ -158,8 +169,14 @@ def fit(
     ``utils.trading``.  Returns a dict whose keys are metric names
     (e.g. ``train_loss``, ``val_profit``) and whose values are per-epoch
     lists.
+
+    If ``config.early_stop_patience > 0``, training stops once
+    ``config.early_stop_metric`` (evaluated on the validation set) fails to
+    improve by more than ``config.early_stop_min_delta`` for that many
+    consecutive epochs, and *model* is left holding the best-epoch weights
+    rather than the last epoch's.
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     history: Dict[str, list] = {
         "train_loss": [],
         "val_loss": [],
@@ -171,6 +188,19 @@ def fit(
         "val_dir_acc": [],
     }
 
+    # Maps a monitorable metric name to (key in run_epoch's result dict, lower-is-better).
+    metric_map = {
+        "val_loss": ("loss", True),
+        "val_profit": ("cum_profit", False),
+        "val_profit_geo": ("cum_profit_geo", False),
+        "val_dir_acc": ("directional_acc", False),
+    }
+    monitor_key, lower_is_better = metric_map.get(config.early_stop_metric, ("loss", True))
+    best_score: float | None = None
+    best_epoch = 0
+    best_state: Dict[str, torch.Tensor] | None = None
+    epochs_no_improve = 0
+
     for epoch in range(1, config.epochs + 1):
         train_metrics = run_epoch(
             model,
@@ -180,6 +210,7 @@ def fit(
             config.transaction_cost_rate,
             device,
             loss_type=config.loss_type,
+            loss_lambda=config.loss_lambda,
         )
         val_metrics = run_epoch(
             model,
@@ -189,6 +220,7 @@ def fit(
             config.transaction_cost_rate,
             device,
             loss_type=config.loss_type,
+            loss_lambda=config.loss_lambda,
         )
 
         history["train_loss"].append(train_metrics["loss"])
@@ -214,5 +246,31 @@ def fit(
             f"train_geo={train_metrics['cum_profit_geo']:.6f} ({train_profit_geo_php:+,.0f} PHP) "
             f"val_geo={val_metrics['cum_profit_geo']:.6f} ({val_profit_geo_php:+,.0f} PHP)"
         )
+
+        if config.early_stop_patience > 0:
+            current = val_metrics[monitor_key]
+            improved = (
+                best_score is None
+                or (current < best_score - config.early_stop_min_delta if lower_is_better
+                    else current > best_score + config.early_stop_min_delta)
+            )
+            if improved:
+                best_score = current
+                best_epoch = epoch
+                best_state = copy.deepcopy(model.state_dict())
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+            if epochs_no_improve >= config.early_stop_patience:
+                print(
+                    f"Early stopping at epoch {epoch}: no improvement in "
+                    f"{config.early_stop_metric} for {config.early_stop_patience} epochs "
+                    f"(best={best_score:.6f} at epoch {best_epoch})"
+                )
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     return history

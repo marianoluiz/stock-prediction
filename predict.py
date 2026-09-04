@@ -13,9 +13,20 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+import numpy as np
+
 from models.gru_model import GRUReturnPredictor
 from utils.pipeline import cache_path_for
-from utils.preprocessing import compute_returns, load_stock_data
+from utils.preprocessing import (
+    DEFAULT_LAGS,
+    DEFAULT_VOLATILITY_WINDOW,
+    DEFAULT_VOLUME_WINDOW,
+    build_lagged_features,
+    build_rolling_volatility,
+    build_volume_zscore,
+    compute_returns,
+    load_stock_data,
+)
 
 
 def main() -> None:
@@ -43,17 +54,21 @@ def main() -> None:
     print(f"Using device: {device}")
 
     df = load_stock_data(args.symbol, args.start, args.end, cache_path_for(args.symbol, args.start, args.end))
-    returns = compute_returns(df).values.astype("float32")
+    returns_series = compute_returns(df)
+    volume_series = df["Volume"].astype("float32")
     last_date = pd.Timestamp(df.index[-1])
+    last_volume = float(volume_series.iloc[-1])
 
-    if len(returns) < args.sequence_length:
+    min_history = args.sequence_length + max(max(DEFAULT_LAGS), DEFAULT_VOLUME_WINDOW, DEFAULT_VOLATILITY_WINDOW)
+    if len(returns_series) < min_history:
         raise ValueError(
-            f"Only {len(returns)} returns available but sequence_length={args.sequence_length}. "
-            "Use an earlier --start date."
+            f"Only {len(returns_series)} returns available but sequence_length={args.sequence_length} "
+            f"needs {min_history} days of history (lookback + max(longest lag, volume window, "
+            "volatility window)). Use an earlier --start date."
         )
 
     model = GRUReturnPredictor(
-        input_size=1,
+        input_size=1 + len(DEFAULT_LAGS) + 1 + 1,
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
@@ -61,10 +76,20 @@ def main() -> None:
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
-    window = torch.from_numpy(returns[-args.sequence_length:].reshape(1, args.sequence_length, 1)).to(device)
+    def latest_window(returns: pd.Series, volume: pd.Series) -> np.ndarray:
+        # Recomputes lag channels (return_lag1/5/10), the volume z-score, and
+        # rolling volatility from the running series so each forecasted
+        # return is available to later lag/volatility channels too.
+        features = build_lagged_features(returns, DEFAULT_LAGS)
+        vol_z = build_volume_zscore(volume, DEFAULT_VOLUME_WINDOW)
+        volatility = build_rolling_volatility(returns, DEFAULT_VOLATILITY_WINDOW)
+        combined = features.join(vol_z, how="left").join(volatility, how="left").dropna()
+        return combined.values[-args.sequence_length:].astype("float32")
+
+    window = torch.from_numpy(latest_window(returns_series, volume_series)).unsqueeze(0).to(device)
     future_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=args.days)
 
-    print(f"\nData for {args.symbol} up to {last_date.date()} — forecasting the next {args.days} trading days")
+    print(f"\nData for {args.symbol} up to {last_date.date()} - forecasting the next {args.days} trading days")
     print(f"  {'Date':>12}  {'Predicted Return':>17}  {'Signal':>9}")
 
     preds: list[float] = []
@@ -72,13 +97,19 @@ def main() -> None:
         for _ in range(args.days):
             pred = float(model(window).item())
             preds.append(pred)
-            window = torch.cat([window[:, 1:, :], torch.tensor([[[pred]]], device=device)], dim=1)
+            next_index = returns_series.index[-1] + pd.Timedelta(days=1)
+            returns_series = pd.concat([returns_series, pd.Series([pred], index=[next_index])])
+            # No real future volume is observable; carry the last known
+            # volume forward so its z-score stays neutral instead of
+            # fabricating a trend.
+            volume_series = pd.concat([volume_series, pd.Series([last_volume], index=[next_index])])
+            window = torch.from_numpy(latest_window(returns_series, volume_series)).unsqueeze(0).to(device)
 
     for day, p in zip(future_dates, preds):
         signal = "LONG (+1)" if p > 0 else ("SHORT (-1)" if p < 0 else "FLAT (0)")
         print(f"  {str(day.date()):>12}  {p:>+16.4%}  {signal:>9}")
 
-    print("\nNote: predictions are iterative — each day's forecast is fed back as input.")
+    print("\nNote: predictions are iterative - each day's forecast is fed back as input.")
 
 
 if __name__ == "__main__":

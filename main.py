@@ -9,8 +9,9 @@ from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch
 from utils.metrics import trade_log
 from utils.pipeline import prepare_data
-from utils.plotting import plot_history
+from utils.plotting import format_date, plot_history
 from utils.preprocessing import SplitData
+from utils.trading import calibrate_alpha
 
 
 def run_single(
@@ -24,20 +25,27 @@ def run_single(
     show_trade_log: bool = False,
 ) -> tuple[dict, dict]:
     """Train one model with the given loss type and return (history, test_metrics)."""
+    output_scale = (args.output_cap_std / args.alpha) if args.output_cap_std > 0 else None
     model = GRUReturnPredictor(
-        input_size=1,
+        input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
         dropout=args.dropout,
+        output_scale=output_scale,
     ).to(device)
 
     config = TrainingConfig(
         loss_type=loss_type,
         alpha=args.alpha,
+        loss_lambda=args.loss_lambda,
         transaction_cost_rate=args.transaction_cost,
         learning_rate=args.lr,
+        weight_decay=args.weight_decay,
         batch_size=args.batch_size,
         epochs=args.epochs,
+        early_stop_patience=args.early_stop_patience,
+        early_stop_min_delta=args.early_stop_min_delta,
+        early_stop_metric=args.early_stop_metric,
     )
 
     label = loss_type.upper().replace("-", " ")
@@ -57,7 +65,7 @@ def run_single(
         loss_type=loss_type,
     )
 
-    print(f"\nTest Metrics [{label}] ({split.dates_test[0]} -> {split.dates_test[-1]})")
+    print(f"\nTest Metrics [{label}] ({format_date(split.dates_test[0])} -> {format_date(split.dates_test[-1])})")
     print(f"  Loss:                {test_metrics['loss']:.6f}")
     print(f"  MSE:                 {test_metrics['mse']:.8f}")
     print(f"  MAE:                 {test_metrics['mae']:.8f}")
@@ -80,10 +88,24 @@ def run_single(
             transaction_cost_rate=args.transaction_cost,
         )
 
-    results_dir = Path("results") / loss_type.replace("-", "_")
+    loss_key = loss_type.replace("-", "_")
+    end_actual = format_date(split.dates_test[-1])
+    tag = f"{args.symbol}_{loss_key}_{args.start}_{end_actual}"
+
+    results_dir = Path("results") / loss_key
     results_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), results_dir / f"gru_{loss_type.replace('-', '_')}.pt")
-    plot_history(history, results_dir, capital=args.capital, title=f"{label} Loss")
+    torch.save(model.state_dict(), results_dir / f"{tag}.pt")
+    plot_history(
+        history,
+        results_dir,
+        capital=args.capital,
+        symbol=args.symbol,
+        start=args.start,
+        end=end_actual,
+        loss_label=label,
+        split=split,
+        file_prefix=tag,
+    )
 
     return history, test_metrics
 
@@ -105,17 +127,24 @@ def main() -> None:
 
     # Trading / Loss
     parser.add_argument("--loss", type=str, default="profit-aware",        choices=["mse", "profit-aware"],
-                        help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
+                        help="Loss function: 'mse' (baseline) or 'profit-aware' (additive P&L)")
     parser.add_argument("--compare", action="store_true",                  help="Run both MSE and profit-aware, print comparison table")
     parser.add_argument("--trade-log", action="store_true",                help="Print per-trade P&L log for every test trade")
-    parser.add_argument("--alpha", type=float, default=1.0,                help="Sharpness of tanh signal: higher = more aggressive binary-like positioning")
-    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1% per trade)")
+    parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
+    parser.add_argument("--loss-lambda", type=float, default=0.1,          help="Weight of the MSE calibration term in the profit-aware loss (0 = pure profit, larger = more calibration; 0 lets pred drift unbounded and saturate tanh, see TODO.md)")
+    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display (default: 100,000)")
 
     # Training
     parser.add_argument("--epochs", type=int, default=50,                  help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=64,              help="Mini-batch size")
     parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
+    parser.add_argument("--weight-decay", type=float, default=1e-3,        help="AdamW weight decay; caps pred magnitude from diverging when chasing tanh saturation")
+    parser.add_argument("--output-cap-std", type=float, default=5.0,       help="Hard-bound predicted return to +-N std devs of train returns via a tanh head (0 = unbounded)")
+    parser.add_argument("--early-stop-patience", type=int, default=0,      help="Stop training if --early-stop-metric doesn't improve for this many epochs (0 = disabled, train the full --epochs). Restores the best-epoch weights before saving.")
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
+    parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"],
+                        help="Validation metric to monitor for early stopping")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -125,6 +154,10 @@ def main() -> None:
     # same pipeline used by train.py and evaluate.py.
     data = prepare_data(args.symbol, args.start, args.end, args.sequence_length, args.batch_size)
     split = data.split
+
+    if args.alpha is None:
+        args.alpha = calibrate_alpha(split.y_train)
+        print(f"Auto-calibrated alpha: {args.alpha:.4f} (train return std = {split.y_train.std():.6f})")
 
     print(f"Train: {len(split.x_train)} samples ({split.dates_train[0]} -> {split.dates_train[-1]})")
     print(f"Val:   {len(split.x_val)} samples ({split.dates_val[0]} -> {split.dates_val[-1]})")

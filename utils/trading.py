@@ -1,38 +1,53 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 
-class StraightThroughSignal(torch.autograd.Function):
-    """Binary signal in the forward pass; smooth tanh slope in the backward pass.
+def calibrate_alpha(train_returns: np.ndarray) -> float:
+    """Pick ``alpha`` so a one-std-dev predicted return saturates ``tanh`` to ~0.76.
 
-    The forward pass returns ``sign(pred)`` (a full long +1 / short -1 position)
-    so that the loss sees exactly the signal used for validation/test metrics.
-    The backward pass pretends the derivative is that of ``tanh(alpha * pred)``
-    so gradients keep flowing through the otherwise flat ``sign`` curve.
+    ``alpha = 1 / std(train_returns)``. Daily equity returns are O(1%), so a
+    fixed ``alpha`` tuned for one asset is badly miscalibrated for another with
+    different volatility (e.g. SPY vs NVDA) — deriving it from the *training*
+    split's own return scale keeps ``tanh(alpha * pred)`` meaningfully
+    sensitive across assets instead of sitting in its near-linear dead zone
+    (``alpha`` too small) or saturating for every prediction (``alpha`` too
+    large).
     """
-
-    @staticmethod
-    def forward(ctx, predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
-        ctx.save_for_backward(predicted_return)
-        ctx.alpha = alpha
-        return torch.sign(predicted_return)
-
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None]:
-        (predicted_return,) = ctx.saved_tensors
-        slope = ctx.alpha * (1 - torch.tanh(ctx.alpha * predicted_return) ** 2)
-        return grad_output * slope, None
+    std = float(np.std(train_returns))
+    if std <= 0:
+        return 1.0
+    return 1.0 / std
 
 
-def trading_signal(predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
-    """Trading signal with straight-through gradients.
+def smooth_signal(predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
+    """Continuous trading position: ``tanh(alpha * predicted_return)``.
 
-    Forward: ``sign(predicted_return)`` in {-1, +1} (identical to val/test).
-    Backward: derivative of ``tanh(alpha * predicted_return)``; ``alpha`` tunes
-    how smooth that backward slope is (higher = more aggressive/binary-like).
+    Unlike the old straight-through ``sign`` hack, forward and backward use the
+    *same* smooth function, so gradients remain alive for every ``|r|`` (no
+    saturation) and there is no fake forward/backward coupling to maintain.
+    The output is a position size in ``(-1, 1)``, where magnitude scales how
+    confident we are and sign is the direction.
     """
-    return StraightThroughSignal.apply(predicted_return, alpha)
+    return torch.tanh(alpha * predicted_return)
+
+
+def thresholded_signal(
+    predicted_return: torch.Tensor,
+    alpha: float,
+    threshold: float = 0.0,
+) -> torch.Tensor:
+    """Discrete long/flat/short execution signal, gated by confidence.
+
+    Confidence is ``|tanh(alpha * predicted_return)|``. When it clears
+    ``threshold`` the position is taken at full size (``sign(predicted_return)``);
+    otherwise the position is flat (``0``). ``threshold=0.0`` reduces to the old
+    always-in-the-market ``sign()`` rule.
+    """
+    confidence = smooth_signal(predicted_return, alpha).abs()
+    full_signal = torch.sign(predicted_return)
+    return torch.where(confidence >= threshold, full_signal, torch.zeros_like(full_signal))
 
 
 def shifted_previous_signal(
@@ -85,8 +100,13 @@ def profit_aware_loss(
     transaction_cost_rate: float = 0.001,
     previous_signal: torch.Tensor | float | None = None,
 ) -> torch.Tensor:
-    """Loss = -mean(signal_t * return_t - cost_t)."""
+    """Loss = -mean(pos_t * return_t - cost_t) over a smooth tanh position.
 
-    signal = trading_signal(predicted_return, alpha)
-    profit = profit_per_step(signal, actual_return, previous_signal, transaction_cost_rate)
+    ``pos = tanh(alpha * r_hat)`` is a continuous position size in (-1, 1), so
+    gradients flow for every prediction magnitude (no saturation). Transaction
+    costs apply to any position change, including fractional sizing changes.
+    """
+
+    pos = smooth_signal(predicted_return, alpha)
+    profit = profit_per_step(pos, actual_return, previous_signal, transaction_cost_rate)
     return -profit.mean()
