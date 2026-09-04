@@ -1,0 +1,40 @@
+
+Total benchmark time: 317.1s
+
+==============================================================================
+  AGGREGATE SUMMARY (mean across symbols)
+==============================================================================
+  Loss               DirAcc      CumRet      GeoRet    Sharpe      RMSE
+  --------------------------------------------------------------------------
+  mse                0.4666     +0.0159     +0.0156    +0.262   0.01832
+  profit-aware       0.4575     -0.0318     -0.0338    -0.118   0.10102
+  buy & hold                    -0.0403
+
+==============================================================================
+  BY TIER (mean across symbols in tier)
+==============================================================================
+  Loss               DirAcc      CumRet      GeoRet    Sharpe      RMSE
+  --------------------------------------------------------------------------
+  strong/mse         0.4968     +0.0926     +0.0946    +1.250   0.02370
+  strong/profit-aware    0.5129     +0.9058     +1.2660    +1.954   0.11226
+
+  mid/mse            0.4838     +0.0188     +0.0177    +0.221   0.01949
+  mid/profit-aware    0.4466     -0.1460     -0.1770    -0.434   0.09993
+
+  weak/mse           0.4459     +0.0075     +0.0076    +0.239   0.01765
+  weak/profit-aware    0.4548     -0.0462     -0.0642    -0.095   0.10446
+
+  index/mse          0.5032     -0.0065     -0.0068    -0.241   0.01080
+  index/profit-aware    0.5032     -0.0405     -0.0564    -0.195   0.06633
+
+
+  profit-aware beats MSE on (out of 18 symbols):
+    Geometric return: 4/18
+    Sharpe-like:      6/18
+    Directional acc:  6/18
+
+==============================================================================
+  DEGENERATE RUNS (executed signal never changes across the test window)
+==============================================================================
+  mse            2/18  ['PSE:ALI', 'PSE:PSEI']
+  profit-aware   18/18  ['PSE:ICT', 'PSE:CNPF', 'PSE:AREIT', 'PSE:MER', 'PSE:BPI', 'PSE:BDO', 'PSE:GLO', 'PSE:PGOLD', 'PSE:TEL', 'PSE:MBT', 'PSE:SM', 'PSE:AEV', 'PSE:SMPH', 'PSE:EW', 'PSE:MEG', 'PSE:URC', 'PSE:ALI', 'PSE:PSEI']
