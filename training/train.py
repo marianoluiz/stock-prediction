@@ -34,7 +34,7 @@ class TrainingConfig:
 
     loss_type: str = "profit-aware"
     alpha: float = 1.0
-    loss_lambda: float = 0.1
+    loss_lambda: float = 0.7
     transaction_cost_rate: float = 0.001
     learning_rate: float = 1e-3
     weight_decay: float = 0.0

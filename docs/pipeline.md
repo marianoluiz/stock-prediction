@@ -98,7 +98,7 @@ Each epoch, for every batch:
 5. **Loss (profit-aware)**: `-mean(net_profit)` — minimizing loss = maximizing profit:
    `loss = -mean(net_profit)`
    - An **MSE calibration term** `loss_lambda * mean((pred - actual)^2)` is added via
-     `--loss-lambda` (default `0.1`). Originally this was the *only* thing keeping
+     `--loss-lambda` (default `0.7`). Originally this was the *only* thing keeping
      `pred` from drifting unbounded and saturating `tanh` (see `TODO.md`); now that
      the output head is hard-capped (step 1), `loss_lambda` is no longer solely
      responsible for magnitude control — it still steers the model toward an

@@ -186,7 +186,7 @@ def main() -> None:
     parser.add_argument("--num-layers", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--alpha", type=float, default=None)
-    parser.add_argument("--loss-lambda", type=float, default=0.1)
+    parser.add_argument("--loss-lambda", type=float, default=0.7)
     parser.add_argument("--transaction-cost", type=float, default=0.001)
     parser.add_argument("--capital", type=float, default=100_000.0)
     parser.add_argument("--epochs", type=int, default=50)
@@ -202,6 +202,7 @@ def main() -> None:
     parser.add_argument("--walk-forward", action="store_true", help="Use expanding-window walk-forward validation (--folds contiguous out-of-time test chunks) instead of a single train/val/test split")
     parser.add_argument("--folds", type=int, default=4, help="Number of walk-forward folds (only used with --walk-forward)")
     parser.add_argument("--eval-fraction", type=float, default=0.30, help="Fraction of each symbol's sequence reserved as the walk-forward evaluation region, split into --folds contiguous test chunks (only used with --walk-forward; with the defaults, fold 0's train/val boundary matches the single-split train_ratio=0.70 default)")
+    parser.add_argument("--charts", action="store_true", help="Also save MSE-vs-profit-aware comparison bar charts (profit, geometric profit, Sharpe-like, RMSE) next to the output CSV, grouped by market (PH symbols are 'PSE:'-prefixed, everything else is US)")
     args = parser.parse_args()
 
     if args.symbols is not None:
@@ -410,6 +411,14 @@ def main() -> None:
     summary_path = out_path.with_name(out_path.stem + "_summary.txt")
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     print(f"Saved aggregate summary to {summary_path}")
+
+    if args.charts:
+        import pandas as pd
+        from plot_loss_comparison import market_of, plot_comparisons
+
+        df = pd.read_csv(out_path)
+        df["market"] = df["symbol"].map(market_of)
+        plot_comparisons(df, out_path.parent, label=out_path.stem)
 
 
 if __name__ == "__main__":

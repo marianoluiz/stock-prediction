@@ -19,10 +19,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from benchmark import MARKETS
+from plot_loss_comparison import grouped_bar
 from utils.pipeline import build_sequences, cache_path_for
 from utils.preprocessing import train_val_test_split
 
@@ -197,6 +199,28 @@ def main() -> None:
 
     comparison_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nSaved market comparison to {comparison_path}")
+
+    charts = [
+        ("max_drawdown", "Max Drawdown (fraction of capital)", "max_drawdown_comparison.png", None),
+        (
+            "lag1_autocorrelation", "Mean Lag-1 Autocorrelation of Test-Window Returns",
+            "lag1_autocorr_comparison.png", (0.0, "No autocorrelation (white noise)"),
+        ),
+    ]
+    for column, ylabel, filename, reference_line in charts:
+        vals = [float(df[df["market"] == m][column].mean()) for m in markets]
+        fig, ax = plt.subplots(figsize=(7, 5))
+        grouped_bar(
+            ax, markets, [("Mean across symbols", vals)],
+            ylabel=ylabel,
+            title=f"{ylabel} by Market",
+            reference_line=reference_line,
+        )
+        fig.tight_layout()
+        chart_path = out_path.parent / filename
+        fig.savefig(chart_path, dpi=200)
+        plt.close(fig)
+        print(f"Saved {chart_path}  ({dict(zip(markets, vals))})")
 
 
 if __name__ == "__main__":
