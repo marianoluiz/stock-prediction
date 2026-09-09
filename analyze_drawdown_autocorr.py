@@ -44,6 +44,20 @@ def lag1_autocorr(returns: np.ndarray) -> float:
     return float(pd.Series(returns).autocorr(lag=1))
 
 
+def autocorr_significant(ac: float, n: int) -> bool:
+    """True if |ac| exceeds the 95% white-noise band ±1.96/sqrt(n) (Bartlett's formula)."""
+    return abs(ac) > 1.96 / np.sqrt(n)
+
+
+def autocorr_interpretation(mean_ac: float) -> str:
+    """Plain-language read of a market's mean lag-1 autocorrelation."""
+    if abs(mean_ac) < 0.02:
+        return "a day tells you almost nothing about tomorrow"
+    if mean_ac < 0:
+        return "up days tend to be followed by down days"
+    return "up days tend to be followed by up days"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Max drawdown + lag-1 autocorrelation over the GRU benchmark's test split"
@@ -81,15 +95,17 @@ def main() -> None:
 
         dd = max_drawdown(split.y_test)
         ac = lag1_autocorr(split.y_test)
+        n_test = len(split.y_test)
         rows.append(
             {
                 "symbol": symbol,
                 "market": market,
                 "max_drawdown": dd,
                 "lag1_autocorrelation": ac,
+                "significant_95": autocorr_significant(ac, n_test),
                 "test_start": pd.Timestamp(split.dates_test[0]).date().isoformat(),
                 "test_end": pd.Timestamp(split.dates_test[-1]).date().isoformat(),
-                "n_test": len(split.y_test),
+                "n_test": n_test,
             }
         )
 
@@ -124,16 +140,26 @@ def main() -> None:
     print(f"\n{'='*78}")
     print("  GROUP SUMMARY (mean / median across symbols)")
     print(f"{'='*78}")
-    print(f"  {'Market':<8}{'MaxDD mean':>14}{'MaxDD median':>16}{'LagAC mean':>14}{'LagAC median':>16}")
+    print(f"  {'Market':<8}{'MaxDD mean':>14}{'MaxDD median':>16}{'LagAC mean':>14}{'LagAC median':>16}{'Sig@95%':>12}")
     for market in sorted(df["market"].unique()):
         sub = df[df["market"] == market]
+        n_sig = int(sub["significant_95"].sum())
+        n_total = len(sub)
         print(
             f"  {market:<8}"
             f"{sub['max_drawdown'].mean()*100:>13.1f}%"
             f"{sub['max_drawdown'].median()*100:>15.1f}%"
             f"{sub['lag1_autocorrelation'].mean():>14.4f}"
             f"{sub['lag1_autocorrelation'].median():>16.4f}"
+            f"{f'{n_sig}/{n_total}':>12}"
         )
+
+    print(
+        "\n  Sig@95% = symbols whose |lag-1 autocorrelation| exceeds the white-noise band "
+        "+/-1.96/sqrt(n) (Bartlett's formula) -- i.e. a real (non-random) day-to-day signal,"
+        "\n  not just noise. A negative mean AC means up days tend to be followed by down days;"
+        " an AC near zero means a day tells you almost nothing about tomorrow."
+    )
 
     print(f"\n{'='*78}")
     print("  TEST-WINDOW DATE RANGE PER SYMBOL")
@@ -144,6 +170,33 @@ def main() -> None:
     out_path = Path(args.output)
     df.to_csv(out_path, index=False)
     print(f"\nSaved per-symbol results to {out_path}")
+
+    markets = sorted(df["market"].unique())
+    comparison_path = out_path.parent / "market_comparison.md"
+    lines = [
+        "| Metric | " + " | ".join(f"{m} Market" for m in markets) + " |",
+        "| --- | " + " | ".join("---" for _ in markets) + " |",
+    ]
+    mean_ac_cells = []
+    sig_cells = []
+    for m in markets:
+        sub = df[df["market"] == m]
+        mean_ac = sub["lag1_autocorrelation"].mean()
+        n_sig = int(sub["significant_95"].sum())
+        n_total = len(sub)
+        mean_ac_cells.append(f"{mean_ac:+.3f} ({autocorr_interpretation(mean_ac)})")
+        sig_cells.append(f"{n_sig}/{n_total}")
+    lines.append("| Mean lag-1 autocorrelation | " + " | ".join(mean_ac_cells) + " |")
+    lines.append("| Symbols with a real signal (95%) | " + " | ".join(sig_cells) + " |")
+
+    print(f"\n{'='*78}")
+    print("  MARKET COMPARISON")
+    print(f"{'='*78}")
+    for line in lines:
+        print("  " + line)
+
+    comparison_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"\nSaved market comparison to {comparison_path}")
 
 
 if __name__ == "__main__":
