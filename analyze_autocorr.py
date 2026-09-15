@@ -1,4 +1,4 @@
-"""Max drawdown and lag-1 autocorrelation over the exact GRU benchmark test window.
+"""Lag-1 autocorrelation over the exact GRU benchmark test window.
 
 Reuses benchmark.py's own symbol lists and utils/pipeline.py's data-loading +
 windowing + train_val_test_split pipeline, so the test-window dates here are
@@ -9,9 +9,9 @@ utils.preprocessing.load_stock_data via benchmark.py or main.py. Missing
 caches are reported, not silently skipped or downloaded.
 
 Usage:
-    python analyze_drawdown_autocorr.py
-    python analyze_drawdown_autocorr.py --market ph
-    python analyze_drawdown_autocorr.py --start 2018-01-01 --sequence-length 30
+    python analyze_autocorr.py
+    python analyze_autocorr.py --market ph
+    python analyze_autocorr.py --start 2018-01-01 --sequence-length 30
 """
 
 from __future__ import annotations
@@ -27,19 +27,6 @@ from benchmark import MARKETS
 from plot_loss_comparison import grouped_bar
 from utils.pipeline import build_sequences, cache_path_for
 from utils.preprocessing import train_val_test_split
-
-
-def max_drawdown(returns: np.ndarray) -> float:
-    """Max drawdown of the cumulative-return series built from `returns`.
-
-    Cumulative price starts at 1.0 within the window itself (no external
-    anchor before the window), tracks the running peak, and reports the most
-    negative (peak - trough) / peak seen -- as a fraction, e.g. -0.308.
-    """
-    cum = np.cumprod(1.0 + returns)
-    running_peak = np.maximum.accumulate(cum)
-    drawdown = (cum - running_peak) / running_peak
-    return float(drawdown.min())
 
 
 def lag1_autocorr(returns: np.ndarray) -> float:
@@ -62,13 +49,13 @@ def autocorr_interpretation(mean_ac: float) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Max drawdown + lag-1 autocorrelation over the GRU benchmark's test split"
+        description="Lag-1 autocorrelation over the GRU benchmark's test split"
     )
     parser.add_argument("--market", type=str, default="all", choices=["us", "ph", "all"])
     parser.add_argument("--start", type=str, default="2018-01-01")
     parser.add_argument("--end", type=str, default=None)
     parser.add_argument("--sequence-length", type=int, default=30)
-    parser.add_argument("--output", type=str, default="drawdown_autocorr_summary.csv")
+    parser.add_argument("--output", type=str, default="autocorr_summary.csv")
     args = parser.parse_args()
 
     if args.market == "all":
@@ -95,14 +82,12 @@ def main() -> None:
             missing.append(f"{symbol} (cached, but test split is empty)")
             continue
 
-        dd = max_drawdown(split.y_test)
         ac = lag1_autocorr(split.y_test)
         n_test = len(split.y_test)
         rows.append(
             {
                 "symbol": symbol,
                 "market": market,
-                "max_drawdown": dd,
                 "lag1_autocorrelation": ac,
                 "significant_95": autocorr_significant(ac, n_test),
                 "test_start": pd.Timestamp(split.dates_test[0]).date().isoformat(),
@@ -125,32 +110,30 @@ def main() -> None:
 
     df = pd.DataFrame(rows)
 
-    print("=" * 96)
-    print("  PER-SYMBOL: MAX DRAWDOWN & LAG-1 AUTOCORRELATION (test split only)")
-    print("=" * 96)
+    print("=" * 86)
+    print("  PER-SYMBOL: LAG-1 AUTOCORRELATION (test split only)")
+    print("=" * 86)
     print(
-        f"  {'Symbol':<12}{'Market':<8}{'MaxDD':>10}{'LagAC':>10}"
+        f"  {'Symbol':<12}{'Market':<8}{'LagAC':>10}"
         f"  {'TestStart':>12}  {'TestEnd':>12}{'N':>6}"
     )
-    print(f"  {'-'*90}")
+    print(f"  {'-'*80}")
     for r in rows:
         print(
-            f"  {r['symbol']:<12}{r['market']:<8}{r['max_drawdown']*100:>9.1f}%{r['lag1_autocorrelation']:>10.4f}"
+            f"  {r['symbol']:<12}{r['market']:<8}{r['lag1_autocorrelation']:>10.4f}"
             f"  {r['test_start']:>12}  {r['test_end']:>12}{r['n_test']:>6}"
         )
 
     print(f"\n{'='*78}")
     print("  GROUP SUMMARY (mean / median across symbols)")
     print(f"{'='*78}")
-    print(f"  {'Market':<8}{'MaxDD mean':>14}{'MaxDD median':>16}{'LagAC mean':>14}{'LagAC median':>16}{'Sig@95%':>12}")
+    print(f"  {'Market':<8}{'LagAC mean':>14}{'LagAC median':>16}{'Sig@95%':>12}")
     for market in sorted(df["market"].unique()):
         sub = df[df["market"] == market]
         n_sig = int(sub["significant_95"].sum())
         n_total = len(sub)
         print(
             f"  {market:<8}"
-            f"{sub['max_drawdown'].mean()*100:>13.1f}%"
-            f"{sub['max_drawdown'].median()*100:>15.1f}%"
             f"{sub['lag1_autocorrelation'].mean():>14.4f}"
             f"{sub['lag1_autocorrelation'].median():>16.4f}"
             f"{f'{n_sig}/{n_total}':>12}"
@@ -200,27 +183,19 @@ def main() -> None:
     comparison_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nSaved market comparison to {comparison_path}")
 
-    charts = [
-        ("max_drawdown", "Max Drawdown (fraction of capital)", "max_drawdown_comparison.png", None),
-        (
-            "lag1_autocorrelation", "Mean Lag-1 Autocorrelation of Test-Window Returns",
-            "lag1_autocorr_comparison.png", (0.0, "No autocorrelation (white noise)"),
-        ),
-    ]
-    for column, ylabel, filename, reference_line in charts:
-        vals = [float(df[df["market"] == m][column].mean()) for m in markets]
-        fig, ax = plt.subplots(figsize=(7, 5))
-        grouped_bar(
-            ax, markets, [("Mean across symbols", vals)],
-            ylabel=ylabel,
-            title=f"{ylabel} by Market",
-            reference_line=reference_line,
-        )
-        fig.tight_layout()
-        chart_path = out_path.parent / filename
-        fig.savefig(chart_path, dpi=200)
-        plt.close(fig)
-        print(f"Saved {chart_path}  ({dict(zip(markets, vals))})")
+    vals = [float(df[df["market"] == m]["lag1_autocorrelation"].mean()) for m in markets]
+    fig, ax = plt.subplots(figsize=(7, 5))
+    grouped_bar(
+        ax, markets, [("Mean across symbols", vals)],
+        ylabel="Mean Lag-1 Autocorrelation of Test-Window Returns",
+        title="Mean Lag-1 Autocorrelation of Test-Window Returns by Market",
+        reference_line=(0.0, "No autocorrelation (white noise)"),
+    )
+    fig.tight_layout()
+    chart_path = out_path.parent / "lag1_autocorr_comparison.png"
+    fig.savefig(chart_path, dpi=200)
+    plt.close(fig)
+    print(f"Saved {chart_path}  ({dict(zip(markets, vals))})")
 
 
 if __name__ == "__main__":
