@@ -148,3 +148,20 @@ python predict.py --model models/nvda_pa.pt --symbol NVDA --days 10
 
 > `main.py --compare` still exists as a shortcut that trains both losses in one
 > run and prints a side-by-side comparison table.
+
+## Web UI (live demo)
+
+`streamlit run webapp.py`
+
+Pick a ticker from the thesis benchmark universe in the sidebar, click **Run**,
+and it trains fresh MSE and Profit-Aware GRUs on the same chronological split
+(same defaults as `main.py --compare`), then shows:
+
+- Side-by-side metric cards (directional accuracy, cumulative/geometric
+  return, Sharpe-like ratio, RMSE) plus a Buy & Hold reference
+- A bar-chart comparison and a running balance chart over the test window
+- The full per-trade log for each loss, as an interactive table
+
+Every ticker in `benchmark.py`'s `MARKETS` already has a cached CSV under
+`data/`, so the demo runs offline. Advanced settings (epochs, sequence
+length, capital, transaction cost, etc.) are in the sidebar's expander.

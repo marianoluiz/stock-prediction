@@ -67,15 +67,27 @@ def root_mean_squared_error(pred: np.ndarray, actual: np.ndarray) -> float:
     return float(np.sqrt(mean_squared_error(pred, actual)))
 
 
-def trade_log(
+def trade_log_records(
     signal: np.ndarray,
     actual_return: np.ndarray,
     pred: np.ndarray,
     dates: Sequence,
     capital: float,
     transaction_cost_rate: float = 0.001,
-) -> None:
-    """Print a per-trade log showing P&L and running balance for every trade."""
+) -> tuple[list[dict], dict]:
+    """Build the per-trade P&L rows and summary stats, without printing.
+
+    Shared by :func:`trade_log` (CLI) and the Streamlit demo (`webapp.py`) so
+    both render the exact same trade-by-trade numbers.
+
+    Returns:
+        ``(records, summary)``: ``records`` has one dict per trade (``date``,
+        ``return``, ``pred``, ``signal``, ``net_return``, ``trade_pnl``,
+        ``add_balance``, ``geo_balance``); ``summary`` has ``wins``,
+        ``losses``, ``best_trade``, ``best_date``, ``worst_trade``,
+        ``worst_date``, ``total_add``, ``total_geo``, ``final_add_balance``,
+        ``final_geo_balance``.
+    """
     n = len(signal)
     add_balance = capital
     geo_balance = capital
@@ -87,13 +99,7 @@ def trade_log(
     worst_trade = 0.0
     best_date = ""
     worst_date = ""
-
-    header = (
-        f"{'#':>4}  {'Date':>12}  {'Return':>8}  {'Pred':>8}  "
-        f"{'Signal':>6}  {'Trade P&L':>12}  {'Add Bal':>14}  {'Geo Bal':>14}"
-    )
-    print(header)
-    print("-" * len(header))
+    records: list[dict] = []
 
     for i in range(n):
         s = float(signal[i])
@@ -109,13 +115,17 @@ def trade_log(
 
         date_str = str(dates[i])[:10] if i < len(dates) else "?"
 
-        sig_label = "+1" if s > 0 else "-1" if s < 0 else "FLAT"
-        sign = "+" if net_return >= 0 else ""
-        print(
-            f"{i+1:4d}  {date_str:>12}  {r*100:>+7.2f}%  {p:>+8.4f}  "
-            f"{sig_label:>6}  "
-            f"{sign}{net_return*capital:>+11,.0f}  "
-            f"{add_balance:>13,.0f}  {geo_balance:>13,.0f}"
+        records.append(
+            {
+                "date": date_str,
+                "return": r,
+                "pred": p,
+                "signal": s,
+                "net_return": net_return,
+                "trade_pnl": trade_pnl,
+                "add_balance": add_balance,
+                "geo_balance": geo_balance,
+            }
         )
 
         if net_return >= 0:
@@ -131,11 +141,52 @@ def trade_log(
 
         prev_sig = s
 
+    summary = {
+        "wins": wins,
+        "losses": losses,
+        "best_trade": best_trade,
+        "best_date": best_date,
+        "worst_trade": worst_trade,
+        "worst_date": worst_date,
+        "total_add": add_balance - capital,
+        "total_geo": geo_balance - capital,
+        "final_add_balance": add_balance,
+        "final_geo_balance": geo_balance,
+    }
+    return records, summary
+
+
+def trade_log(
+    signal: np.ndarray,
+    actual_return: np.ndarray,
+    pred: np.ndarray,
+    dates: Sequence,
+    capital: float,
+    transaction_cost_rate: float = 0.001,
+) -> None:
+    """Print a per-trade log showing P&L and running balance for every trade."""
+    records, summary = trade_log_records(signal, actual_return, pred, dates, capital, transaction_cost_rate)
+
+    header = (
+        f"{'#':>4}  {'Date':>12}  {'Return':>8}  {'Pred':>8}  "
+        f"{'Signal':>6}  {'Trade P&L':>12}  {'Add Bal':>14}  {'Geo Bal':>14}"
+    )
+    print(header)
     print("-" * len(header))
-    total_add = add_balance - capital
-    total_geo = geo_balance - capital
-    print(f"  TOTALS: {wins} wins / {losses} losses")
-    print(f"  Best trade:   {best_date}  {best_trade*capital:>+,.0f} PHP ({best_trade*100:+.2f}%)")
-    print(f"  Worst trade:  {worst_date}  {worst_trade*capital:>+,.0f} PHP ({worst_trade*100:+.2f}%)")
-    print(f"  Additive:     {total_add:>+,.0f} PHP (final {add_balance:>,.0f})")
-    print(f"  Geometric:    {total_geo:>+,.0f} PHP (final {geo_balance:>,.0f})")
+
+    for i, rec in enumerate(records):
+        sig_label = "+1" if rec["signal"] > 0 else "-1" if rec["signal"] < 0 else "FLAT"
+        sign = "+" if rec["net_return"] >= 0 else ""
+        print(
+            f"{i+1:4d}  {rec['date']:>12}  {rec['return']*100:>+7.2f}%  {rec['pred']:>+8.4f}  "
+            f"{sig_label:>6}  "
+            f"{sign}{rec['trade_pnl']:>+11,.0f}  "
+            f"{rec['add_balance']:>13,.0f}  {rec['geo_balance']:>13,.0f}"
+        )
+
+    print("-" * len(header))
+    print(f"  TOTALS: {summary['wins']} wins / {summary['losses']} losses")
+    print(f"  Best trade:   {summary['best_date']}  {summary['best_trade']*capital:>+,.0f} PHP ({summary['best_trade']*100:+.2f}%)")
+    print(f"  Worst trade:  {summary['worst_date']}  {summary['worst_trade']*capital:>+,.0f} PHP ({summary['worst_trade']*100:+.2f}%)")
+    print(f"  Additive:     {summary['total_add']:>+,.0f} PHP (final {summary['final_add_balance']:>,.0f})")
+    print(f"  Geometric:    {summary['total_geo']:>+,.0f} PHP (final {summary['final_geo_balance']:>,.0f})")
