@@ -26,10 +26,14 @@ import torch
 from benchmark import MARKETS, buy_and_hold_return, is_degenerate_signal
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch
-from utils.metrics import trade_log_records
-from utils.pipeline import prepare_data
+from utils.baselines import evaluate_price_strategies
+from utils.metrics import running_balance, sharpe_like, trade_log_records
+from utils.pipeline import cache_path_for, prepare_data
+from utils.preprocessing import load_stock_data
 from utils.plotting import format_date
 from utils.trading import calibrate_alpha
+
+STRATEGY_LABELS = {"sma_crossover": "SMA Crossover", "rsi": "RSI", "macd": "MACD"}
 
 # Palette (validated categorical slots 1/2 + muted reference gray -- see
 # dataviz skill): blue = MSE, orange = Profit-Aware, gray = Buy & Hold.
@@ -106,6 +110,17 @@ def run_comparison(symbol: str, cfg: dict) -> dict:
 
     buy_hold_return = buy_and_hold_return(mse_metrics["actual_np"])
     buy_hold_balance = cfg["capital"] * np.cumprod(1.0 + mse_metrics["actual_np"])
+    buy_hold_sharpe = sharpe_like(mse_metrics["actual_np"])
+
+    price_df = load_stock_data(symbol, cfg["start"], None, cache_path_for(symbol, cfg["start"], None))
+    strategies = evaluate_price_strategies(
+        price_df["Close"], data.split.dates_test, mse_metrics["actual_np"],
+        transaction_cost_rate=cfg["transaction_cost"],
+    )
+    strategy_balances = {
+        name: running_balance(m["signal"], mse_metrics["actual_np"], cfg["capital"], cfg["transaction_cost"])
+        for name, m in strategies.items()
+    }
 
     return {
         "symbol": symbol,
@@ -116,6 +131,9 @@ def run_comparison(symbol: str, cfg: dict) -> dict:
         "pa": pa_metrics,
         "buy_hold_return": buy_hold_return,
         "buy_hold_balance": buy_hold_balance,
+        "buy_hold_sharpe": buy_hold_sharpe,
+        "strategies": strategies,
+        "strategy_balances": strategy_balances,
     }
 
 
@@ -129,6 +147,15 @@ def metric_card(col, title: str, m: dict, capital: float) -> None:
         st.metric("RMSE", f"{m['rmse']:.5f}")
         if m.get("degenerate"):
             st.caption("⚠️ never changes side over the test window")
+
+
+def strategy_card(col, title: str, m: dict, capital: float) -> None:
+    with col:
+        st.markdown(f"**{title}**")
+        st.metric("Directional Accuracy", f"{m['directional_acc']*100:.1f}%")
+        st.metric("Cumulative Return", f"{m['cum_profit']*100:+.2f}%", f"{m['cum_profit']*capital:+,.0f} PHP")
+        st.metric("Geometric Return", f"{m['cum_profit_geo']*100:+.2f}%", f"{m['cum_profit_geo']*capital:+,.0f} PHP")
+        st.metric("Sharpe-like Ratio", f"{m['sharpe_like']:.3f}")
 
 
 def comparison_figure(mse: dict, pa: dict):
@@ -272,6 +299,13 @@ with col_bh:
         f"{result['buy_hold_return']*100:+.2f}%",
         f"{result['buy_hold_return']*capital:+,.0f} PHP",
     )
+    st.metric("Sharpe-like Ratio", f"{result['buy_hold_sharpe']:.3f}")
+
+st.markdown("### Classic strategy baselines")
+st.caption("Trend-following, mean-reversion, and momentum strategies on the same test window and costs.")
+strategy_cols = st.columns(3)
+for col, name in zip(strategy_cols, ["sma_crossover", "rsi", "macd"]):
+    strategy_card(col, STRATEGY_LABELS[name], result["strategies"][name], capital)
 
 st.markdown("### MSE vs Profit-Aware at a glance")
 st.pyplot(comparison_figure(mse, pa))
@@ -283,10 +317,12 @@ chart_df = pd.DataFrame(
         "MSE": [r["geo_balance"] for r in mse["records"]],
         "Profit-Aware": [r["geo_balance"] for r in pa["records"]],
         "Buy & Hold": result["buy_hold_balance"],
+        **{STRATEGY_LABELS[name]: bal for name, bal in result["strategy_balances"].items()},
     },
     index=pd.Index(dates, name="Date"),
 )
-st.line_chart(chart_df, color=[COLOR_MSE, COLOR_PA, COLOR_REF])
+strategy_colors = ["#8a5fbf", "#4fa07a", "#c94f6d"]
+st.line_chart(chart_df, color=[COLOR_MSE, COLOR_PA, COLOR_REF, *strategy_colors])
 
 st.markdown("### Trade log")
 tab_mse, tab_pa = st.tabs(["MSE Baseline", "Profit-Aware"])

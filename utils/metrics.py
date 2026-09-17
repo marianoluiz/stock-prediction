@@ -52,6 +52,19 @@ def cumulative_profit_geometric(
     return balance - 1.0
 
 
+def running_balance(
+    signal: np.ndarray,
+    actual_return: np.ndarray,
+    capital: float,
+    transaction_cost_rate: float = 0.001,
+) -> np.ndarray:
+    """Geometric running balance after every step, for balance-curve plotting."""
+    previous_signal = np.concatenate(([0.0], signal[:-1]))
+    costs = transaction_cost_rate * np.abs(signal - previous_signal)
+    net_returns = signal * actual_return - costs
+    return capital * np.cumprod(1.0 + net_returns)
+
+
 def mean_squared_error(pred: np.ndarray, actual: np.ndarray) -> float:
     """Mean squared error between predicted and actual returns."""
     return float(np.mean((pred - actual) ** 2))

@@ -27,8 +27,12 @@ import torch
 
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch
-from utils.pipeline import prepare_data, prepare_walk_forward
+from utils.baselines import evaluate_price_strategies
+from utils.pipeline import cache_path_for, prepare_data, prepare_walk_forward
+from utils.preprocessing import load_stock_data
 from utils.trading import calibrate_alpha
+
+STRATEGY_NAMES = ("sma_crossover", "rsi", "macd")
 
 TIERED_SYMBOLS = {
     # persistent uptrend, model's easy case
@@ -148,6 +152,18 @@ def run_one_split(
     test_metrics["buy_hold"] = buy_and_hold_return(test_metrics["actual_np"])
     test_metrics["always_short"] = always_short_return(test_metrics["actual_np"])
     test_metrics["degenerate"] = is_degenerate_signal(test_metrics["signal_np"])
+
+    price_df = load_stock_data(symbol, args.start, args.end, cache_path_for(symbol, args.start, args.end))
+    strategies = evaluate_price_strategies(
+        price_df["Close"], split.dates_test, test_metrics["actual_np"],
+        transaction_cost_rate=args.transaction_cost,
+    )
+    for name, m in strategies.items():
+        test_metrics[f"{name}_dir_acc"] = m["directional_acc"]
+        test_metrics[f"{name}_cum_ret"] = m["cum_profit"]
+        test_metrics[f"{name}_geo_ret"] = m["cum_profit_geo"]
+        test_metrics[f"{name}_sharpe"] = m["sharpe_like"]
+
     return test_metrics
 
 
@@ -284,6 +300,18 @@ def main() -> None:
     bh = np.mean([r["buy_hold"] for r in rows if r["loss_type"] == "mse"]) if rows else float("nan")
     emit(f"  {'buy & hold':<15}{'':>10}{bh:>+12.4f}")
 
+    # Strategy baseline metrics don't depend on loss_type (same actual
+    # returns either way), so pull them from just one loss_type's rows.
+    strategy_rows = [r for r in rows if r["loss_type"] == "mse"]
+    for name in STRATEGY_NAMES:
+        if not strategy_rows:
+            continue
+        dir_acc = np.mean([r[f"{name}_dir_acc"] for r in strategy_rows])
+        cum_ret = np.mean([r[f"{name}_cum_ret"] for r in strategy_rows])
+        geo_ret = np.mean([r[f"{name}_geo_ret"] for r in strategy_rows])
+        sharpe = np.mean([r[f"{name}_sharpe"] for r in strategy_rows])
+        emit(f"  {name:<15}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}")
+
     # --- Per-tier breakdown ---------------------------------------------------
     emit(f"\n{'='*78}")
     emit("  BY TIER (mean across symbols in tier)")
@@ -351,6 +379,18 @@ def main() -> None:
         emit(f"    Sharpe-like:      {wins_sharpe}/{n_pairs}")
         emit(f"    Directional acc:  {wins_diracc}/{n_pairs}")
 
+    # --- Profit-aware vs classic TA strategy baselines --------------------
+    pa_rows = [r for r in rows if r["loss_type"] == "profit-aware"]
+    if pa_rows:
+        emit(f"\n{'='*78}")
+        emit("  PROFIT-AWARE vs CLASSIC STRATEGY BASELINES (per symbol-fold run)")
+        emit(f"{'='*78}")
+        n = len(pa_rows)
+        for name in STRATEGY_NAMES:
+            wins_geo = sum(r["cum_profit_geo"] > r[f"{name}_geo_ret"] for r in pa_rows)
+            wins_sharpe = sum(r["sharpe_like"] > r[f"{name}_sharpe"] for r in pa_rows)
+            emit(f"  profit-aware beats {name:<15} geo_ret: {wins_geo}/{n}   sharpe: {wins_sharpe}/{n}")
+
     # --- Fold stability: how consistent is geo-return across a symbol's folds -
     if args.walk_forward and args.folds > 1:
         emit(f"\n{'='*78}")
@@ -396,14 +436,23 @@ def main() -> None:
     # --- Save per-symbol CSV --------------------------------------------------
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    strategy_cols = ",".join(f"{name}_dir_acc,{name}_cum_ret,{name}_geo_ret,{name}_sharpe" for name in STRATEGY_NAMES)
     with out_path.open("w", encoding="utf-8") as f:
-        f.write("symbol,tier,loss_type,fold,n_test,directional_acc,cum_profit,cum_profit_geo,sharpe_like,mse,mae,rmse,buy_hold,always_short,degenerate\n")
+        f.write(
+            "symbol,tier,loss_type,fold,n_test,directional_acc,cum_profit,cum_profit_geo,sharpe_like,"
+            f"mse,mae,rmse,buy_hold,always_short,degenerate,{strategy_cols}\n"
+        )
         for r in rows:
+            strategy_vals = ",".join(
+                f"{r[f'{name}_dir_acc']:.6f},{r[f'{name}_cum_ret']:.6f},"
+                f"{r[f'{name}_geo_ret']:.6f},{r[f'{name}_sharpe']:.6f}"
+                for name in STRATEGY_NAMES
+            )
             f.write(
                 f"{r['symbol']},{r['tier']},{r['loss_type']},{r['fold']},{r['n_test']},{r['directional_acc']:.6f},"
                 f"{r['cum_profit']:.6f},{r['cum_profit_geo']:.6f},{r['sharpe_like']:.6f},"
                 f"{r['mse']:.8f},{r['mae']:.8f},{r['rmse']:.8f},{r['buy_hold']:.6f},"
-                f"{r['always_short']:.6f},{r['degenerate']}\n"
+                f"{r['always_short']:.6f},{r['degenerate']},{strategy_vals}\n"
             )
     print(f"\nSaved per-symbol results to {out_path}")
 
