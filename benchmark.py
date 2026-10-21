@@ -463,7 +463,7 @@ def main() -> None:
 
     if args.charts:
         import pandas as pd
-        from plot_loss_comparison import market_of, plot_comparisons
+        from scripts.plot_loss_comparison import market_of, plot_comparisons
 
         df = pd.read_csv(out_path)
         df["market"] = df["symbol"].map(market_of)

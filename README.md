@@ -74,6 +74,27 @@ Example:
 
 `python main.py --compare --epochs 50`
 
+### With cost vs without cost
+
+`scripts/cost_comparison.py` trains three GRUs per symbol (MSE, profit-aware
+with no cost in the loss, profit-aware with the position-change cost
+`c * |signal_t - signal_{t-1}|` in the loss) and scores every one under both
+cost 0 and cost `c`, so all conditions share the same cost assumption.
+
+```
+.venv/Scripts/python.exe scripts/cost_comparison.py
+.venv/Scripts/python.exe scripts/cost_comparison.py --symbols AAPL,MSFT --epochs 30
+.venv/Scripts/python.exe scripts/cost_comparison.py --cost 0.002
+```
+
+Options: `--symbols` (comma-separated, default NVDA,AAPL,MSFT,KO,XOM,F),
+`--cost` (default 0.001), `--epochs`, `--loss-lambda`, `--seed`, `--out`
+(default `results/cost_comparison`). Budget about 3 minutes for the default
+6 symbols. Writes `results/cost_comparison.csv` (per-symbol data),
+`results/cost_comparison_summary.txt` (mean tables) and
+`results/cost_comparison.png` (return without cost, return with cost, and
+position-change charts).
+
 Artifacts are saved in [results](results). Models and curves are named with the
 stock symbol + date range, e.g. for `AAPL` trained `2018-01-01` to the latest
 date (`2026-08-17`):

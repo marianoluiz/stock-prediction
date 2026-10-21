@@ -1,0 +1,19 @@
+
+=== WITHOUT cost (eval cost = 0) ===
+condition                           GeoRet    AddRet   Sharpe  Turnover   Final PHP
+MSE baseline                       +0.0153   +0.0161   +0.032    0.0339     101,534
+Profit-aware (no cost in loss)     +0.1366   +0.1278   +0.506    0.2375     113,656
+Profit-aware (cost in loss)        +0.2046   +0.1769   +0.707    0.1098     120,458
+
+=== WITH cost (eval cost = 0.001) ===
+condition                           GeoRet    AddRet   Sharpe  Turnover   Final PHP
+MSE baseline                       +0.0043   +0.0052   -0.189    0.0339     100,428
+Profit-aware (no cost in loss)     +0.0586   +0.0518   +0.174    0.2375     105,863
+Profit-aware (cost in loss)        +0.1664   +0.1418   +0.555    0.1098     116,640
+
+=== Cost drag on geometric return (no-cost minus with-cost), mean over symbols ===
+MSE baseline                       +0.0111
+Profit-aware (no cost in loss)     +0.0779
+Profit-aware (cost in loss)        +0.0382
+
+With cost: pa_cost beats pa_nocost on 4/6 symbols, beats MSE on 4/6
