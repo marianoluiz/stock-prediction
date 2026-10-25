@@ -8,14 +8,17 @@ this script only adds the loop over symbols and the aggregate summary.
 Skips torch.save/plotting per run to stay fast; see main.py for a single
 stock's full artifacts (weights + curves).
 
-The universe is the Philippine market only: the PSEi constituents plus the
-PSEi itself as a passive reference (see PH_TIERED_SYMBOLS). Trading costs
-default to the PSE's asymmetric buy (0.296%) / sell (0.396%) rates.
+The universe is the Philippine market only: the PSEi constituents
+(PSEI_STOCKS), reported as one group, plus the PSEi itself (INDEX_SYMBOL) as a
+separate passive market reference that is not averaged in with the stocks.
+Trading costs default to the PSE's asymmetric buy (0.296%) / sell (0.396%)
+rates.
 
 Usage:
     python benchmark.py
-    python benchmark.py --symbols PSE:ICT,PSE:BDO --epochs 30
     python benchmark.py --charts
+    python benchmark.py --symbols PSE:ICT,PSE:BDO --epochs 30
+    python benchmark.py --from-csv results/benchmark_summary_ph_<time>.csv --charts   # re-summarize, no training
 """
 
 from __future__ import annotations
@@ -42,25 +45,23 @@ STRATEGY_NAMES = ("sma_crossover", "rsi", "macd")
 # windows -- too few for a 70/15/15 split. Tickers use tvDatafeed's
 # "EXCHANGE:TICKER" convention (routed off yfinance in
 # utils.preprocessing.load_stock_data) since yfinance doesn't carry the PSE.
-#
-# Tiered by total price return from the first bar on/after 2018-01-01 (or the
-# listing date, for AREIT/MONDE/RCR) to 2026-10-23: strong >= +25%,
-# weak <= -25%, mid in between. The PSEi itself returned -34% over the window,
-# so "weak" is the market's own direction, not an outlier group.
-PH_TIERED_SYMBOLS = {
-    "strong": ["PSE:ICT", "PSE:EMI", "PSE:PLUS", "PSE:ACEN", "PSE:CNPF", "PSE:AREIT", "PSE:CBC", "PSE:MER"],
-    "mid": ["PSE:BPI", "PSE:RCR", "PSE:BDO", "PSE:GLO", "PSE:PGOLD", "PSE:LTG", "PSE:TEL"],
-    "weak": [
-        "PSE:MBT", "PSE:SMC", "PSE:JFC", "PSE:AEV", "PSE:AC", "PSE:DMC", "PSE:SM",
-        "PSE:MONDE", "PSE:SMPH", "PSE:GTCAP", "PSE:URC", "PSE:ALI", "PSE:SCC", "PSE:JGS",
-    ],
-    # passive-index reference, not scored as a performance tier
-    "index": ["PSE:PSEI"],
-}
-TIER_ORDER = ("strong", "mid", "weak", "index")
+PSEI_STOCKS = [
+    "PSE:AC", "PSE:ACEN", "PSE:AEV", "PSE:ALI", "PSE:AREIT", "PSE:BDO", "PSE:BPI", "PSE:CBC",
+    "PSE:CNPF", "PSE:DMC", "PSE:EMI", "PSE:GLO", "PSE:GTCAP", "PSE:ICT", "PSE:JFC", "PSE:JGS",
+    "PSE:LTG", "PSE:MBT", "PSE:MER", "PSE:MONDE", "PSE:PGOLD", "PSE:PLUS", "PSE:RCR", "PSE:SCC",
+    "PSE:SM", "PSE:SMC", "PSE:SMPH", "PSE:TEL", "PSE:URC",
+]
+# The index itself: a passive market reference, reported separately and never
+# averaged in with the stocks.
+INDEX_SYMBOL = "PSE:PSEI"
 
-DEFAULT_SYMBOLS = [s for tier in PH_TIERED_SYMBOLS.values() for s in tier]
-SYMBOL_TIER = {s: tier for tier, symbols in PH_TIERED_SYMBOLS.items() for s in symbols}
+DEFAULT_SYMBOLS = [*PSEI_STOCKS, INDEX_SYMBOL]
+LOSS_TYPES = ("mse", "profit-aware")
+
+
+def group_of(symbol: str) -> str:
+    """``"index"`` for the PSEi reference, ``"stock"`` for everything else."""
+    return "index" if symbol == INDEX_SYMBOL else "stock"
 
 
 def buy_and_hold_return(actual_returns: np.ndarray) -> float:
@@ -144,7 +145,7 @@ def run_one_split(
     )
     test_metrics["symbol"] = symbol
     test_metrics["loss_type"] = loss_type
-    test_metrics["tier"] = SYMBOL_TIER.get(symbol, "?")
+    test_metrics["group"] = group_of(symbol)
     test_metrics["fold"] = fold
     test_metrics["n_test"] = len(split.x_test)
     test_metrics["buy_hold"] = buy_and_hold_return(test_metrics["actual_np"])
@@ -189,9 +190,187 @@ def run_one_walk_forward(
     ]
 
 
+def _mean_row(label: str, sub: list[dict], keys: tuple[str, ...], with_rmse: bool) -> str:
+    dir_acc, cum_ret, geo_ret, sharpe = (np.mean([r[k] for r in sub]) for k in keys)
+    line = f"  {label:<22}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}"
+    if with_rmse:
+        line += f"{np.mean([r['rmse'] for r in sub]):>10.5f}"
+    return line
+
+
+def summarize(
+    rows: list[dict],
+    buy_cost: float,
+    sell_cost: float,
+    loss_lambda: float,
+    walk_forward: bool = False,
+    total_dt: float | None = None,
+) -> list[str]:
+    """Build the text summary: the stocks as one group, the PSEi as a separate
+    reference, win counts, strategy baselines, fold stability and degenerate runs.
+    """
+    lines: list[str] = []
+    emit = lines.append
+    rule = "=" * 85
+    header = f"  {'Model':<22}{'DirAcc':>10}{'CumRet':>12}{'GeoRet':>12}{'Sharpe':>10}{'RMSE':>10}"
+    model_keys = ("directional_acc", "cum_profit", "cum_profit_geo", "sharpe_like")
+
+    if total_dt is not None:
+        emit(f"Total benchmark time: {total_dt:.1f}s")
+    emit(f"Trading costs: buy {buy_cost:.3%}, sell {sell_cost:.3%}; loss lambda {loss_lambda}")
+    emit("")
+
+    stock_rows = [r for r in rows if r["group"] == "stock"]
+    index_rows = [r for r in rows if r["group"] == "index"]
+    n_stocks = len({r["symbol"] for r in stock_rows})
+    per = "symbols x folds" if walk_forward else "stocks"
+
+    # --- Stocks, one group ---------------------------------------------------
+    emit(rule)
+    emit(f"  PSEi CONSTITUENTS (mean across {n_stocks} {per})")
+    emit(rule)
+    emit(header)
+    emit(f"  {'-' * 81}")
+    for loss_type in LOSS_TYPES:
+        sub = [r for r in stock_rows if r["loss_type"] == loss_type]
+        if sub:
+            emit(_mean_row(loss_type, sub, model_keys, with_rmse=True))
+    # Reference columns (buy & hold, strategies) don't depend on loss_type, so
+    # take them from one loss_type's rows to count each stock once.
+    ref = [r for r in stock_rows if r["loss_type"] == "mse"]
+    if ref:
+        emit(f"  {'buy & hold':<22}{'':>10}{np.mean([r['buy_hold'] for r in ref]):>+12.4f}")
+        for name in STRATEGY_NAMES:
+            keys = (f"{name}_dir_acc", f"{name}_cum_ret", f"{name}_geo_ret", f"{name}_sharpe")
+            emit(_mean_row(name, ref, keys, with_rmse=False))
+
+    # --- Index reference -------------------------------------------------------
+    if index_rows:
+        emit("")
+        emit(rule)
+        emit(f"  PSEi INDEX ({INDEX_SYMBOL}, passive market reference, not in the mean above)")
+        emit(rule)
+        emit(header)
+        emit(f"  {'-' * 81}")
+        for loss_type in LOSS_TYPES:
+            sub = [r for r in index_rows if r["loss_type"] == loss_type]
+            if sub:
+                emit(_mean_row(loss_type, sub, model_keys, with_rmse=True))
+        ref_idx = [r for r in index_rows if r["loss_type"] == "mse"]
+        if ref_idx:
+            emit(f"  {'buy & hold':<22}{'':>10}{np.mean([r['buy_hold'] for r in ref_idx]):>+12.4f}")
+
+    # --- Win counts: profit-aware vs MSE, stocks only ---------------------------
+    by_symbol: dict[str, dict[str, list[dict]]] = {}
+    by_symbol_fold: dict[tuple[str, int], dict[str, dict]] = {}
+    for r in stock_rows:
+        by_symbol.setdefault(r["symbol"], {}).setdefault(r["loss_type"], []).append(r)
+        by_symbol_fold.setdefault((r["symbol"], r["fold"]), {})[r["loss_type"]] = r
+
+    def sym_mean(symbol: str, loss_type: str, key: str) -> float:
+        return float(np.mean([r[key] for r in by_symbol[symbol][loss_type]]))
+
+    def emit_wins(title: str, pairs: list[tuple]) -> None:
+        n = len(pairs)
+        emit("")
+        emit(f"  profit-aware beats MSE on (out of {n} {title}):")
+        for label, key in (("Geometric return", "cum_profit_geo"), ("Sharpe-like", "sharpe_like"),
+                           ("Directional acc", "directional_acc")):
+            wins = sum(pa(key) > mse(key) for pa, mse in pairs)
+            emit(f"    {label + ':':<18}{wins}/{n}")
+
+    if walk_forward:
+        emit_wins("stock-fold runs, pooled", [
+            ((lambda k, d=d: d["profit-aware"][k]), (lambda k, d=d: d["mse"][k]))
+            for d in by_symbol_fold.values() if "mse" in d and "profit-aware" in d
+        ])
+    emit_wins("stocks, mean across folds" if walk_forward else "stocks", [
+        ((lambda k, s=s: sym_mean(s, "profit-aware", k)), (lambda k, s=s: sym_mean(s, "mse", k)))
+        for s, d in by_symbol.items() if "mse" in d and "profit-aware" in d
+    ])
+
+    # --- Profit-aware vs classic TA strategy baselines, stocks only -------------
+    pa_rows = [r for r in stock_rows if r["loss_type"] == "profit-aware"]
+    if pa_rows:
+        emit("")
+        emit(rule)
+        emit(f"  PROFIT-AWARE vs CLASSIC STRATEGY BASELINES (out of {len(pa_rows)} stock runs)")
+        emit(rule)
+        n = len(pa_rows)
+        for name in STRATEGY_NAMES:
+            wins_geo = sum(r["cum_profit_geo"] > r[f"{name}_geo_ret"] for r in pa_rows)
+            wins_sharpe = sum(r["sharpe_like"] > r[f"{name}_sharpe"] for r in pa_rows)
+            emit(f"  profit-aware beats {name:<15} geo_ret: {wins_geo}/{n}   sharpe: {wins_sharpe}/{n}")
+
+    # --- Fold stability: how consistent is geo-return across a symbol's folds -
+    if walk_forward:
+        emit("")
+        emit(rule)
+        emit("  FOLD STABILITY (std-dev of geometric return across a stock's folds)")
+        emit("  Lower = more consistent across time regimes, not just a lucky window")
+        emit(rule)
+        emit(f"  {'Symbol':<10}" + "".join(f"{lt:>15}" for lt in LOSS_TYPES))
+        emit(f"  {'-' * 10}" + "".join(f"{'-' * 15}" for _ in LOSS_TYPES))
+        per_loss_stds: dict[str, list[float]] = {lt: [] for lt in LOSS_TYPES}
+        for symbol in sorted(by_symbol):
+            groups = [by_symbol[symbol].get(lt, []) for lt in LOSS_TYPES]
+            if any(len(g) < 2 for g in groups):
+                continue
+            vals = [float(np.std([r["cum_profit_geo"] for r in g], ddof=1)) for g in groups]
+            for lt, v in zip(LOSS_TYPES, vals):
+                per_loss_stds[lt].append(v)
+            emit(f"  {symbol:<10}" + "".join(f"{v:>15.4f}" for v in vals))
+        emit(f"  {'-' * 10}" + "".join(f"{'-' * 15}" for _ in LOSS_TYPES))
+        emit(f"  {'mean':<10}" + "".join(
+            f"{np.mean(per_loss_stds[lt]):>15.4f}" if per_loss_stds[lt] else f"{'n/a':>15}" for lt in LOSS_TYPES
+        ))
+
+    # --- Degenerate (constant-signal) runs, every symbol ------------------------
+    emit("")
+    emit(rule)
+    emit("  DEGENERATE RUNS (executed signal never changes side across the test window)")
+    emit(rule)
+    for loss_type in LOSS_TYPES:
+        sub = [r for r in rows if r["loss_type"] == loss_type]
+        deg_symbols = [r["symbol"] for r in sub if r["degenerate"]]
+        emit(f"  {loss_type:<15}{len(deg_symbols)}/{len(sub)}  {deg_symbols}")
+    return lines
+
+
+def write_csv(rows: list[dict], out_path: Path, buy_cost: float, sell_cost: float, loss_lambda: float) -> None:
+    strategy_cols = ",".join(f"{name}_dir_acc,{name}_cum_ret,{name}_geo_ret,{name}_sharpe" for name in STRATEGY_NAMES)
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write(
+            "symbol,group,loss_type,fold,n_test,directional_acc,cum_profit,cum_profit_geo,sharpe_like,"
+            f"mse,mae,rmse,buy_hold,always_short,degenerate,{strategy_cols},buy_cost,sell_cost,loss_lambda\n"
+        )
+        for r in rows:
+            strategy_vals = ",".join(
+                f"{r[f'{name}_dir_acc']:.6f},{r[f'{name}_cum_ret']:.6f},"
+                f"{r[f'{name}_geo_ret']:.6f},{r[f'{name}_sharpe']:.6f}"
+                for name in STRATEGY_NAMES
+            )
+            f.write(
+                f"{r['symbol']},{r['group']},{r['loss_type']},{r['fold']},{r['n_test']},{r['directional_acc']:.6f},"
+                f"{r['cum_profit']:.6f},{r['cum_profit_geo']:.6f},{r['sharpe_like']:.6f},"
+                f"{r['mse']:.8f},{r['mae']:.8f},{r['rmse']:.8f},{r['buy_hold']:.6f},"
+                f"{r['always_short']:.6f},{r['degenerate']},{strategy_vals},"
+                f"{buy_cost},{sell_cost},{loss_lambda}\n"
+            )
+
+
+def rows_from_csv(path: Path) -> list[dict]:
+    """Per-run rows back from a benchmark CSV (older CSVs with a ``tier`` column included)."""
+    import pandas as pd
+
+    df = pd.read_csv(path)
+    df["group"] = df["symbol"].map(group_of)
+    return df.drop(columns=["tier"], errors="ignore").to_dict("records")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark MSE vs profit-aware GRU across many stocks")
-    parser.add_argument("--symbols", type=str, default=None, help="Comma-separated EXCHANGE:TICKER list (default: the full PSEi universe in PH_TIERED_SYMBOLS)")
+    parser = argparse.ArgumentParser(description="Benchmark MSE vs profit-aware GRU across the PSEi")
+    parser.add_argument("--symbols", type=str, default=None, help="Comma-separated EXCHANGE:TICKER list (default: PSEI_STOCKS plus the PSEi index)")
     parser.add_argument("--start", type=str, default="2018-01-01")
     parser.add_argument("--end", type=str, default=None)
     parser.add_argument("--sequence-length", type=int, default=30)
@@ -216,254 +395,87 @@ def main() -> None:
     parser.add_argument("--walk-forward", action="store_true", help="Use expanding-window walk-forward validation (--folds contiguous out-of-time test chunks) instead of a single train/val/test split")
     parser.add_argument("--folds", type=int, default=4, help="Number of walk-forward folds (only used with --walk-forward)")
     parser.add_argument("--eval-fraction", type=float, default=0.30, help="Fraction of each symbol's sequence reserved as the walk-forward evaluation region, split into --folds contiguous test chunks (only used with --walk-forward; with the defaults, fold 0's train/val boundary matches the single-split train_ratio=0.70 default)")
-    parser.add_argument("--charts", action="store_true", help="Also save MSE-vs-profit-aware comparison charts (returns, Sharpe-like, RMSE, directional accuracy, buy & hold) into <output stem>_charts/, grouped by tier")
+    parser.add_argument("--charts", action="store_true", help="Also save the MSE-vs-profit-aware comparison charts into <output stem>_charts/")
+    parser.add_argument("--from-csv", type=str, default=None, help="Skip training: rebuild the _summary.txt (and charts, with --charts) from an existing benchmark CSV")
     args = parser.parse_args()
 
-    if args.symbols is not None:
-        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
-        market_tag = "custom"
+    if args.from_csv:
+        out_path = Path(args.from_csv)
+        rows = rows_from_csv(out_path)
+        first = rows[0]
+        buy_cost = first.get("buy_cost", args.buy_cost)
+        sell_cost = first.get("sell_cost", args.sell_cost)
+        loss_lambda = first.get("loss_lambda", args.loss_lambda)
+        if "buy_cost" not in first:
+            print(f"Note: {out_path.name} does not record its costs/lambda; assuming the current defaults.")
+        summary_lines = summarize(rows, buy_cost, sell_cost, loss_lambda,
+                                  walk_forward=max(r["fold"] for r in rows) > 0)
+        print("\n".join(summary_lines))
     else:
-        symbols = DEFAULT_SYMBOLS
-        market_tag = "ph"
+        buy_cost, sell_cost, loss_lambda = args.buy_cost, args.sell_cost, args.loss_lambda
+        if args.symbols is not None:
+            symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+            market_tag = "custom"
+        else:
+            symbols = DEFAULT_SYMBOLS
+            market_tag = "ph"
 
-    if args.output is None:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output = f"results/benchmark_summary_{market_tag}_{stamp}.csv"
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    if args.walk_forward:
-        print(f"Walk-forward mode: {args.folds} expanding-window folds, eval_fraction={args.eval_fraction}")
-    loss_types = ("mse", "profit-aware")
-    print(f"Trading costs: buy {args.buy_cost:.3%}, sell {args.sell_cost:.3%} per unit of position change")
-    print(f"Benchmarking {len(symbols)} symbols x {len(loss_types)} losses: {symbols}\n")
-
-    rows: list[dict] = []
-    t_start = time.time()
-
-    for i, symbol in enumerate(symbols, 1):
-        for loss_type in loss_types:
-            t0 = time.time()
-            try:
-                if args.walk_forward:
-                    fold_metrics = run_one_walk_forward(symbol, loss_type, args, device, seed=args.seed)
-                else:
-                    fold_metrics = [run_one(symbol, loss_type, args, device, seed=args.seed)]
-            except Exception as e:
-                print(f"[{i}/{len(symbols)}] {symbol:10s} {loss_type:13s} FAILED: {e}")
-                continue
-            dt = time.time() - t0
-            rows.extend(fold_metrics)
-            for m in fold_metrics:
-                deg_tag = " [DEGENERATE: constant signal]" if m["degenerate"] else ""
-                fold_tag = f" fold={m['fold']}" if args.walk_forward else ""
-                print(
-                    f"[{i}/{len(symbols)}] {symbol:10s} ({m['tier']:<6s}) {loss_type:13s}{fold_tag} "
-                    f"dir_acc={m['directional_acc']:.3f} cum_ret={m['cum_profit']:+.4f} "
-                    f"geo_ret={m['cum_profit_geo']:+.4f} sharpe={m['sharpe_like']:+.3f} "
-                    f"(buy&hold={m['buy_hold']:+.4f} always_short={m['always_short']:+.4f}){deg_tag}"
-                )
-            fold_note = f" / {len(fold_metrics)} folds" if args.walk_forward else ""
-            print(f"  [{dt:.1f}s total{fold_note}]")
-
-    total_dt = time.time() - t_start
-
-    summary_lines: list[str] = []
-
-    def emit(line: str = "") -> None:
-        print(line)
-        summary_lines.append(line)
-
-    emit(f"\nTotal benchmark time: {total_dt:.1f}s")
-    emit(f"Trading costs: buy {args.buy_cost:.3%}, sell {args.sell_cost:.3%}; loss lambda {args.loss_lambda}\n")
-
-    # --- Aggregate summary -------------------------------------------------
-    emit(f"{'='*85}")
-    emit("  AGGREGATE SUMMARY (mean across symbols x folds)" if args.walk_forward else "  AGGREGATE SUMMARY (mean across symbols)")
-    emit(f"{'='*85}")
-    header = f"  {'Loss':<22}{'DirAcc':>10}{'CumRet':>12}{'GeoRet':>12}{'Sharpe':>10}{'RMSE':>10}"
-    emit(header)
-    emit(f"  {'-'*81}")
-    for loss_type in loss_types:
-        sub = [r for r in rows if r["loss_type"] == loss_type]
-        if not sub:
-            continue
-        dir_acc = np.mean([r["directional_acc"] for r in sub])
-        cum_ret = np.mean([r["cum_profit"] for r in sub])
-        geo_ret = np.mean([r["cum_profit_geo"] for r in sub])
-        sharpe = np.mean([r["sharpe_like"] for r in sub])
-        rmse = np.mean([r["rmse"] for r in sub])
-        emit(f"  {loss_type:<22}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
-
-    bh = np.mean([r["buy_hold"] for r in rows if r["loss_type"] == "mse"]) if rows else float("nan")
-    emit(f"  {'buy & hold':<22}{'':>10}{bh:>+12.4f}")
-
-    # Strategy baseline metrics don't depend on loss_type (same actual
-    # returns either way), so pull them from just one loss_type's rows.
-    strategy_rows = [r for r in rows if r["loss_type"] == "mse"]
-    for name in STRATEGY_NAMES:
-        if not strategy_rows:
-            continue
-        dir_acc = np.mean([r[f"{name}_dir_acc"] for r in strategy_rows])
-        cum_ret = np.mean([r[f"{name}_cum_ret"] for r in strategy_rows])
-        geo_ret = np.mean([r[f"{name}_geo_ret"] for r in strategy_rows])
-        sharpe = np.mean([r[f"{name}_sharpe"] for r in strategy_rows])
-        emit(f"  {name:<22}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}")
-
-    # --- Per-tier breakdown ---------------------------------------------------
-    emit(f"\n{'='*85}")
-    emit("  BY TIER (mean across symbols in tier)")
-    emit(f"{'='*85}")
-    emit(header)
-    emit(f"  {'-'*81}")
-    for tier in TIER_ORDER:
-        for loss_type in loss_types:
-            sub = [r for r in rows if r["tier"] == tier and r["loss_type"] == loss_type]
-            if not sub:
-                continue
-            dir_acc = np.mean([r["directional_acc"] for r in sub])
-            cum_ret = np.mean([r["cum_profit"] for r in sub])
-            geo_ret = np.mean([r["cum_profit_geo"] for r in sub])
-            sharpe = np.mean([r["sharpe_like"] for r in sub])
-            rmse = np.mean([r["rmse"] for r in sub])
-            label = f"{tier}/{loss_type}"
-            emit(f"  {label:<22}{dir_acc:>10.4f}{cum_ret:>+12.4f}{geo_ret:>+12.4f}{sharpe:>+10.3f}{rmse:>10.5f}")
-        emit()
-
-    # --- Win-rate: profit-aware vs mse -----------------------------------------
-    # by_symbol groups a symbol's rows by loss_type (1 row/loss in legacy mode,
-    # `folds` rows/loss in walk-forward mode); by_symbol_fold groups by
-    # (symbol, fold) so a walk-forward run can also report a pooled,
-    # fold-level win-rate rather than only a per-symbol mean.
-    by_symbol: dict[str, dict[str, list[dict]]] = {}
-    by_symbol_fold: dict[tuple[str, int], dict[str, dict]] = {}
-    for r in rows:
-        by_symbol.setdefault(r["symbol"], {}).setdefault(r["loss_type"], []).append(r)
-        by_symbol_fold.setdefault((r["symbol"], r["fold"]), {})[r["loss_type"]] = r
-
-    def sym_mean(symbol: str, loss_type: str, key: str) -> float:
-        return float(np.mean([r[key] for r in by_symbol[symbol][loss_type]]))
-
-    for loss_type in loss_types:
-        if loss_type == "mse":
-            continue
-
+        if args.output is None:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            args.output = f"results/benchmark_summary_{market_tag}_{stamp}.csv"
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {device}")
         if args.walk_forward:
-            wins_geo = wins_sharpe = wins_diracc = n_pairs = 0
-            for d in by_symbol_fold.values():
-                if "mse" not in d or loss_type not in d:
+            print(f"Walk-forward mode: {args.folds} expanding-window folds, eval_fraction={args.eval_fraction}")
+        print(f"Trading costs: buy {args.buy_cost:.3%}, sell {args.sell_cost:.3%} per unit of position change")
+        print(f"Benchmarking {len(symbols)} symbols x {len(LOSS_TYPES)} losses: {symbols}\n")
+
+        rows: list[dict] = []
+        t_start = time.time()
+        for i, symbol in enumerate(symbols, 1):
+            for loss_type in LOSS_TYPES:
+                t0 = time.time()
+                try:
+                    if args.walk_forward:
+                        fold_metrics = run_one_walk_forward(symbol, loss_type, args, device, seed=args.seed)
+                    else:
+                        fold_metrics = [run_one(symbol, loss_type, args, device, seed=args.seed)]
+                except Exception as e:
+                    print(f"[{i}/{len(symbols)}] {symbol:10s} {loss_type:13s} FAILED: {e}")
                     continue
-                n_pairs += 1
-                wins_geo += d[loss_type]["cum_profit_geo"] > d["mse"]["cum_profit_geo"]
-                wins_sharpe += d[loss_type]["sharpe_like"] > d["mse"]["sharpe_like"]
-                wins_diracc += d[loss_type]["directional_acc"] > d["mse"]["directional_acc"]
-            emit(f"\n  {loss_type} beats MSE on (out of {n_pairs} symbol-fold runs, pooled):")
-            emit(f"    Geometric return: {wins_geo}/{n_pairs}")
-            emit(f"    Sharpe-like:      {wins_sharpe}/{n_pairs}")
-            emit(f"    Directional acc:  {wins_diracc}/{n_pairs}")
+                rows.extend(fold_metrics)
+                for m in fold_metrics:
+                    deg_tag = " [DEGENERATE: constant signal]" if m["degenerate"] else ""
+                    fold_tag = f" fold={m['fold']}" if args.walk_forward else ""
+                    print(
+                        f"[{i}/{len(symbols)}] {symbol:10s} ({m['group']:<5s}) {loss_type:13s}{fold_tag} "
+                        f"dir_acc={m['directional_acc']:.3f} cum_ret={m['cum_profit']:+.4f} "
+                        f"geo_ret={m['cum_profit_geo']:+.4f} sharpe={m['sharpe_like']:+.3f} "
+                        f"(buy&hold={m['buy_hold']:+.4f} always_short={m['always_short']:+.4f}){deg_tag}"
+                    )
+                fold_note = f" / {len(fold_metrics)} folds" if args.walk_forward else ""
+                print(f"  [{time.time() - t0:.1f}s total{fold_note}]")
 
-        wins_geo = wins_sharpe = wins_diracc = n_pairs = 0
-        for symbol in by_symbol:
-            if "mse" not in by_symbol[symbol] or loss_type not in by_symbol[symbol]:
-                continue
-            n_pairs += 1
-            wins_geo += sym_mean(symbol, loss_type, "cum_profit_geo") > sym_mean(symbol, "mse", "cum_profit_geo")
-            wins_sharpe += sym_mean(symbol, loss_type, "sharpe_like") > sym_mean(symbol, "mse", "sharpe_like")
-            wins_diracc += sym_mean(symbol, loss_type, "directional_acc") > sym_mean(symbol, "mse", "directional_acc")
+        summary_lines = summarize(rows, args.buy_cost, args.sell_cost, args.loss_lambda,
+                                  walk_forward=args.walk_forward, total_dt=time.time() - t_start)
+        print("\n" + "\n".join(summary_lines))
 
-        label = "per-symbol mean across folds" if args.walk_forward else "symbols"
-        emit(f"\n  {loss_type} beats MSE on (out of {n_pairs} {label}):")
-        emit(f"    Geometric return: {wins_geo}/{n_pairs}")
-        emit(f"    Sharpe-like:      {wins_sharpe}/{n_pairs}")
-        emit(f"    Directional acc:  {wins_diracc}/{n_pairs}")
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        write_csv(rows, out_path, args.buy_cost, args.sell_cost, args.loss_lambda)
+        print(f"\nSaved per-symbol results to {out_path}")
 
-    # --- Profit-aware vs classic TA strategy baselines --------------------
-    pa_rows = [r for r in rows if r["loss_type"] == "profit-aware"]
-    if pa_rows:
-        emit(f"\n{'='*85}")
-        emit("  PROFIT-AWARE vs CLASSIC STRATEGY BASELINES (per symbol-fold run)")
-        emit(f"{'='*85}")
-        n = len(pa_rows)
-        for name in STRATEGY_NAMES:
-            wins_geo = sum(r["cum_profit_geo"] > r[f"{name}_geo_ret"] for r in pa_rows)
-            wins_sharpe = sum(r["sharpe_like"] > r[f"{name}_sharpe"] for r in pa_rows)
-            emit(f"  profit-aware beats {name:<15} geo_ret: {wins_geo}/{n}   sharpe: {wins_sharpe}/{n}")
-
-    # --- Fold stability: how consistent is geo-return across a symbol's folds -
-    if args.walk_forward and args.folds > 1:
-        emit(f"\n{'='*85}")
-        emit("  FOLD STABILITY (std-dev of geometric return across a symbol's folds)")
-        emit("  Lower = more consistent across time regimes, not just a lucky window")
-        emit(f"{'='*85}")
-        emit(f"  {'Symbol':<10}" + "".join(f"{lt:>15}" for lt in loss_types))
-        emit(f"  {'-'*10}" + "".join(f"{'-'*15}" for _ in loss_types))
-        per_loss_stds: dict[str, list[float]] = {lt: [] for lt in loss_types}
-        for symbol in sorted(by_symbol):
-            row_vals = []
-            complete = True
-            for lt in loss_types:
-                group = by_symbol[symbol].get(lt, [])
-                if len(group) < 2:
-                    complete = False
-                    break
-                row_vals.append(float(np.std([r["cum_profit_geo"] for r in group], ddof=1)))
-            if not complete:
-                continue
-            for lt, v in zip(loss_types, row_vals):
-                per_loss_stds[lt].append(v)
-            emit(f"  {symbol:<10}" + "".join(f"{v:>15.4f}" for v in row_vals))
-        emit(f"  {'-'*10}" + "".join(f"{'-'*15}" for _ in loss_types))
-        emit(
-            f"  {'mean':<10}"
-            + "".join(
-                f"{np.mean(per_loss_stds[lt]):>15.4f}" if per_loss_stds[lt] else f"{'n/a':>15}"
-                for lt in loss_types
-            )
-        )
-
-    # --- Degenerate (constant-signal) run count -------------------------------
-    emit(f"\n{'='*85}")
-    emit("  DEGENERATE RUNS (executed signal never changes across the test window)")
-    emit(f"{'='*85}")
-    for loss_type in loss_types:
-        sub = [r for r in rows if r["loss_type"] == loss_type]
-        n_deg = sum(1 for r in sub if r["degenerate"])
-        deg_symbols = [r["symbol"] for r in sub if r["degenerate"]]
-        emit(f"  {loss_type:<15}{n_deg}/{len(sub)}  {deg_symbols}")
-
-    # --- Save per-symbol CSV --------------------------------------------------
-    out_path = Path(args.output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    strategy_cols = ",".join(f"{name}_dir_acc,{name}_cum_ret,{name}_geo_ret,{name}_sharpe" for name in STRATEGY_NAMES)
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(
-            "symbol,tier,loss_type,fold,n_test,directional_acc,cum_profit,cum_profit_geo,sharpe_like,"
-            f"mse,mae,rmse,buy_hold,always_short,degenerate,{strategy_cols},buy_cost,sell_cost,loss_lambda\n"
-        )
-        for r in rows:
-            strategy_vals = ",".join(
-                f"{r[f'{name}_dir_acc']:.6f},{r[f'{name}_cum_ret']:.6f},"
-                f"{r[f'{name}_geo_ret']:.6f},{r[f'{name}_sharpe']:.6f}"
-                for name in STRATEGY_NAMES
-            )
-            f.write(
-                f"{r['symbol']},{r['tier']},{r['loss_type']},{r['fold']},{r['n_test']},{r['directional_acc']:.6f},"
-                f"{r['cum_profit']:.6f},{r['cum_profit_geo']:.6f},{r['sharpe_like']:.6f},"
-                f"{r['mse']:.8f},{r['mae']:.8f},{r['rmse']:.8f},{r['buy_hold']:.6f},"
-                f"{r['always_short']:.6f},{r['degenerate']},{strategy_vals},"
-                f"{args.buy_cost},{args.sell_cost},{args.loss_lambda}\n"
-            )
-    print(f"\nSaved per-symbol results to {out_path}")
-
-    # --- Save aggregate/tier/win-rate summary ---------------------------------
     summary_path = out_path.with_name(out_path.stem + "_summary.txt")
     summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-    print(f"Saved aggregate summary to {summary_path}")
+    print(f"Saved summary to {summary_path}")
 
     if args.charts:
         import pandas as pd
         from scripts.plot_loss_comparison import plot_comparisons
 
-        plot_comparisons(pd.read_csv(out_path), out_path.parent / f"{out_path.stem}_charts")
+        subtitle = (f"PSEi constituents, held-out test window; costs: buy {buy_cost:.3%}, "
+                    f"sell {sell_cost:.3%}; loss lambda = {loss_lambda:g}")
+        plot_comparisons(pd.read_csv(out_path), out_path.parent / f"{out_path.stem}_charts", subtitle=subtitle)
 
 
 if __name__ == "__main__":

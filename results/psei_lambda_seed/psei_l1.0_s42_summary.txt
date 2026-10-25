@@ -1,0 +1,42 @@
+Total benchmark time: 68.5s
+Trading costs: buy 0.296%, sell 0.396%; loss lambda 1.0
+
+=====================================================================================
+  PSEi CONSTITUENTS (mean across 0 symbols x folds)
+=====================================================================================
+  Model                     DirAcc      CumRet      GeoRet    Sharpe      RMSE
+  ---------------------------------------------------------------------------------
+
+=====================================================================================
+  PSEi INDEX (PSE:PSEI, passive market reference, not in the mean above)
+=====================================================================================
+  Model                     DirAcc      CumRet      GeoRet    Sharpe      RMSE
+  ---------------------------------------------------------------------------------
+  mse                       0.5230     +0.0017     +0.0016    +0.026   0.01090
+  profit-aware              0.5230     +0.0045     +0.0041    +0.242   0.01125
+  buy & hold                           -0.0332
+
+  profit-aware beats MSE on (out of 0 stock-fold runs, pooled):
+    Geometric return: 0/0
+    Sharpe-like:      0/0
+    Directional acc:  0/0
+
+  profit-aware beats MSE on (out of 0 stocks, mean across folds):
+    Geometric return: 0/0
+    Sharpe-like:      0/0
+    Directional acc:  0/0
+
+=====================================================================================
+  FOLD STABILITY (std-dev of geometric return across a stock's folds)
+  Lower = more consistent across time regimes, not just a lucky window
+=====================================================================================
+  Symbol                mse   profit-aware
+  ----------------------------------------
+  ----------------------------------------
+  mean                  n/a            n/a
+
+=====================================================================================
+  DEGENERATE RUNS (executed signal never changes side across the test window)
+=====================================================================================
+  mse            5/5  ['PSE:PSEI', 'PSE:PSEI', 'PSE:PSEI', 'PSE:PSEI', 'PSE:PSEI']
+  profit-aware   5/5  ['PSE:PSEI', 'PSE:PSEI', 'PSE:PSEI', 'PSE:PSEI', 'PSE:PSEI']

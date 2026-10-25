@@ -1,11 +1,11 @@
-"""Profit-aware vs MSE comparison charts for the PSEi benchmark, by tier.
+"""Profit-aware vs MSE comparison charts for the PSEi benchmark.
 
-Reads benchmark.py's per-symbol output (columns: symbol, tier, loss_type,
+Reads benchmark.py's per-symbol output (columns: symbol, loss_type,
 cum_profit, cum_profit_geo, sharpe_like, rmse, directional_acc, buy_hold, and
 the classic-strategy columns) and writes one figure per metric. Every grouped
-chart has one group per tier plus an "All" group, with the symbol count under
-each label; all numbers are means across symbols computed at plot time --
-nothing is hardcoded.
+chart has two groups: the PSEi constituents (mean across the stocks) and the
+PSEi index itself as a separate market reference. All numbers are computed
+from the CSV at plot time -- nothing is hardcoded.
 
 Figures written (into --output-dir):
   profit_comparison.png          additive cumulative return
@@ -16,9 +16,9 @@ Figures written (into --output-dir):
   sharpe_comparison.png          Sharpe-like ratio
   rmse_comparison.png            RMSE of the predicted return
   directional_acc_comparison.png directional accuracy, with the 50% chance line
-  strategy_comparison.png        all-universe mean geometric return and Sharpe
-                                 for both GRUs, buy & hold and the TA baselines
-  per_symbol_geo_diff.png        profit-aware minus MSE geometric return, per symbol
+  strategy_comparison.png        mean geometric return and Sharpe across the
+                                 stocks for both GRUs, buy & hold and the TA baselines
+  per_symbol_geo_diff.png        profit-aware minus MSE geometric return, per stock
 
 Called standalone on a benchmark CSV, or from benchmark.py via --charts.
 
@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
 
+from benchmark import INDEX_SYMBOL
 from utils.chart_style import (
     COLOR_MSE,
     COLOR_PA,
@@ -58,8 +59,6 @@ from utils.chart_style import (
     zero_line,
 )
 
-TIER_ORDER = ("strong", "mid", "weak", "index")
-TIER_LABELS = {"all": "All", "strong": "Strong", "mid": "Mid", "weak": "Weak", "index": "PSEi index"}
 STRATEGY_LABELS = {"sma_crossover": "SMA crossover", "rsi": "RSI", "macd": "MACD"}
 
 
@@ -70,15 +69,19 @@ def latest_csv(results_dir: Path = Path("results")) -> Path:
     return matches[-1]
 
 
-def tier_groups(df: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
-    """[("All", every row), ("Strong", ...), ...] for the tiers present in ``df``."""
-    groups = [("all", df)]
-    groups += [(t, df[df["tier"] == t]) for t in TIER_ORDER if (df["tier"] == t).any()]
+def stocks_only(df: pd.DataFrame) -> pd.DataFrame:
+    """The constituent stocks, without the PSEi index reference row."""
+    return df[df["symbol"] != INDEX_SYMBOL]
+
+
+def model_groups(df: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
+    """[(label, rows)]: the constituents as one group, then the index if present."""
+    stocks = stocks_only(df)
+    groups = [(f"PSEi constituents\nmean of {stocks['symbol'].nunique()} stocks", stocks)]
+    index = df[df["symbol"] == INDEX_SYMBOL]
+    if len(index):
+        groups.append(("PSEi index\nmarket reference", index))
     return groups
-
-
-def group_label(key: str, sub: pd.DataFrame) -> str:
-    return f"{TIER_LABELS.get(key, key)}\nn = {sub['symbol'].nunique()}"
 
 
 def grouped_bars(
@@ -91,13 +94,13 @@ def grouped_bars(
     percent: bool = False,
     reference_line: tuple[float, str] | None = None,
 ):
-    """series: (label, column, loss_type or None, color). One bar per series per tier group."""
-    groups = tier_groups(df)
+    """series: (label, column, loss_type or None, color). One bar per series per group."""
+    groups = model_groups(df)
     n = len(series)
     width = min(0.8 / n, 0.26)
     x = np.arange(len(groups))
 
-    fig, ax = plt.subplots(figsize=(8, 4.6))
+    fig, ax = plt.subplots(figsize=(7, 4.6))
     for i, (label, column, loss_type, color) in enumerate(series):
         vals = []
         for _, sub in groups:
@@ -116,7 +119,7 @@ def grouped_bars(
         ax.axhline(ref_val, color=INK_MUTED, linewidth=1.0, linestyle=(0, (4, 3)), zorder=2, label=ref_label)
     zero_line(ax)
     ax.set_xticks(x)
-    ax.set_xticklabels([group_label(k, sub) for k, sub in groups])
+    ax.set_xticklabels([label for label, _ in groups])
     ax.set_ylabel(ylabel)
     if percent:
         percent_axis(ax)
@@ -128,9 +131,10 @@ def grouped_bars(
 
 
 def strategy_figure(df: pd.DataFrame, subtitle: str):
-    """Horizontal bars: universe-mean geometric return and Sharpe for every strategy."""
-    mse = df[df["loss_type"] == "mse"]
-    pa = df[df["loss_type"] == "profit-aware"]
+    """Horizontal bars: mean geometric return and Sharpe across the stocks for every strategy."""
+    stocks = stocks_only(df)
+    mse = stocks[stocks["loss_type"] == "mse"]
+    pa = stocks[stocks["loss_type"] == "profit-aware"]
     rows = [
         (LABEL_PA, pa["cum_profit_geo"].mean(), pa["sharpe_like"].mean(), COLOR_PA),
         (LABEL_MSE, mse["cum_profit_geo"].mean(), mse["sharpe_like"].mean(), COLOR_MSE),
@@ -168,8 +172,8 @@ def strategy_figure(df: pd.DataFrame, subtitle: str):
 
 
 def per_symbol_diff_figure(df: pd.DataFrame, subtitle: str):
-    """Profit-aware minus MSE geometric return for each symbol, sorted."""
-    piv = df.pivot_table(index="symbol", columns="loss_type", values="cum_profit_geo", aggfunc="mean")
+    """Profit-aware minus MSE geometric return for each stock, sorted."""
+    piv = stocks_only(df).pivot_table(index="symbol", columns="loss_type", values="cum_profit_geo", aggfunc="mean")
     piv = piv.dropna(subset=["mse", "profit-aware"])
     diff = (piv["profit-aware"] - piv["mse"]).sort_values()
     names = [s.split(":")[-1] for s in diff.index]
@@ -190,17 +194,17 @@ def per_symbol_diff_figure(df: pd.DataFrame, subtitle: str):
     legend_above(
         ax,
         handles=[Patch(color=COLOR_PA), Patch(color=COLOR_MSE)],
-        labels=[f"{LABEL_PA} higher ({int((diff > 0).sum())} symbols)",
-                f"{LABEL_MSE} higher ({int((diff <= 0).sum())} symbols)"],
+        labels=[f"{LABEL_PA} higher ({int((diff > 0).sum())} stocks)",
+                f"{LABEL_MSE} higher ({int((diff <= 0).sum())} stocks)"],
     )
-    title_block(ax, "Per-symbol geometric return difference", subtitle)
+    title_block(ax, "Per-stock geometric return difference", subtitle)
     fig.tight_layout()
     return fig
 
 
 def default_subtitle(df: pd.DataFrame) -> str:
     """Sample size plus the run's cost/lambda settings, read from the CSV when it records them."""
-    text = f"{df['symbol'].nunique()} PSE symbols, held-out test window"
+    text = "PSEi constituents, held-out test window"
     if {"buy_cost", "sell_cost", "loss_lambda"} <= set(df.columns):
         r = df.iloc[0]
         text += (f"; costs: buy {r['buy_cost']:.3%}, sell {r['sell_cost']:.3%}; "
@@ -220,26 +224,26 @@ def plot_comparisons(df: pd.DataFrame, output_dir: Path, subtitle: str | None = 
     ]
     specs = [
         ("profit_comparison.png", mse_pa("cum_profit"),
-         "Cumulative return (additive) by tier", "Cumulative return", "{:+.1%}", True, None),
+         "Cumulative return (additive)", "Cumulative return", "{:+.1%}", True, None),
         ("profit_geo_comparison.png", mse_pa("cum_profit_geo"),
-         "Geometric return by tier", "Geometric return", "{:+.1%}", True, None),
+         "Geometric return", "Geometric return", "{:+.1%}", True, None),
         ("sharpe_comparison.png", mse_pa("sharpe_like"),
-         "Sharpe-like ratio by tier", "Annualised Sharpe-like ratio", "{:+.2f}", False, None),
+         "Sharpe-like ratio", "Annualised Sharpe-like ratio", "{:+.2f}", False, None),
         ("rmse_comparison.png", mse_pa("rmse"),
-         "Prediction error (RMSE) by tier", "RMSE of predicted daily return", "{:.4f}", False, None),
+         "Prediction error (RMSE)", "RMSE of predicted daily return", "{:.4f}", False, None),
         ("directional_acc_comparison.png", mse_pa("directional_acc"),
-         "Directional accuracy by tier", "Directional accuracy", "{:.1%}", True, (0.5, "Chance (50%)")),
+         "Directional accuracy", "Directional accuracy", "{:.1%}", True, (0.5, "Chance (50%)")),
     ]
     if "buy_hold" in df.columns:
         specs.append((
             "buy_hold_comparison.png",
             mse_pa("cum_profit_geo") + [("Buy & hold", "buy_hold", None, COLOR_REF)],
-            "Geometric return against buy & hold, by tier", "Geometric return", "{:+.1%}", True, None,
+            "Geometric return against buy & hold", "Geometric return", "{:+.1%}", True, None,
         ))
 
     written: list[Path] = []
     for filename, series, title, ylabel, fmt, pct, ref in specs:
-        fig = grouped_bars(df, series, title, f"{sub}; mean across the symbols in each group", ylabel, fmt,
+        fig = grouped_bars(df, series, title, sub, ylabel, fmt,
                            percent=pct, reference_line=ref)
         written.append(save(fig, output_dir / filename))
 

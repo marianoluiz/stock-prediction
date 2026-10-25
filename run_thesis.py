@@ -2,8 +2,8 @@
 
 Runs, in order:
   1. benchmark.py --charts       MSE vs profit-aware on all 30 PSE symbols,
-                                 plus the comparison figures by tier
-  2. scripts/significance.py     paired t-test on that benchmark
+                                 plus the comparison figures
+  2. scripts/significance.py     paired t-test on that benchmark (29 stocks)
   3. scripts/cost_comparison.py  with-cost vs without-cost comparison
   4. main.py --compare           one worked example (PSE:ICT): loss/profit
                                  curves and a full trade log

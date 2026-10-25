@@ -16,7 +16,7 @@ the test window is identical between them.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--symbol` | `str` | `PSE:ICT` | PSE ticker in `EXCHANGE:TICKER` form (e.g. `PSE:ICT`, `PSE:BDO`, `PSE:PSEI`). Fetched from TradingView via `tvDatafeed`. The study universe is `benchmark.py`'s `PH_TIERED_SYMBOLS`. |
+| `--symbol` | `str` | `PSE:ICT` | PSE ticker in `EXCHANGE:TICKER` form (e.g. `PSE:ICT`, `PSE:BDO`, `PSE:PSEI`). Fetched from TradingView via `tvDatafeed`. The study universe is `benchmark.py`'s `PSEI_STOCKS` plus `INDEX_SYMBOL`. |
 | `--start` | `str` | `2018-01-01` | Start date for historical data (`YYYY-MM-DD`). |
 | `--end` | `str` | `None` | End date for historical data. If `None`, uses up to today. |
 

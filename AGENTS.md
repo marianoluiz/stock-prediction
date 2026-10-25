@@ -23,7 +23,9 @@ drifts. This file is about pitfalls that aren't obvious from the code alone.
 ## Scope: PH market only, asymmetric costs
 
 - The study universe is the PSEi constituents (minus MYNLD, too little
-  history) plus `PSE:PSEI` as reference — `benchmark.py::PH_TIERED_SYMBOLS`.
+  history) plus `PSE:PSEI` as reference — `benchmark.py::PSEI_STOCKS` /
+  `INDEX_SYMBOL`. Stocks are reported as one group (no tiers); the index is
+  always reported separately and kept out of stock means and the t-test.
   US tickers were dropped; older `results/` and `docs/run-result*.md` may
   still describe US runs.
 - Symbols are `PSE:TICKER` (routed to tvDatafeed). The `:` is illegal in

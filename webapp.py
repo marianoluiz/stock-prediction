@@ -6,7 +6,7 @@ Reuses the exact same data pipeline, model, and training loop as
 numbers shown here match what the CLI would produce for identical
 arguments. Data is loaded from the CSV caches under data/ -- once
 benchmark.py has run, every ticker in the thesis universe (the PSEi
-constituents, see benchmark.py's PH_TIERED_SYMBOLS) has one, so no network
+constituents and the index, see benchmark.py's DEFAULT_SYMBOLS) has one, so no network
 access is needed for a live defense demo.
 
 Run with:
@@ -29,7 +29,7 @@ import pandas as pd
 import streamlit as st
 import torch
 
-from benchmark import PH_TIERED_SYMBOLS, TIER_ORDER, buy_and_hold_return, is_degenerate_signal
+from benchmark import INDEX_SYMBOL, PSEI_STOCKS, buy_and_hold_return, is_degenerate_signal
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch
 from utils.baselines import evaluate_price_strategies
@@ -50,11 +50,9 @@ st.set_page_config(page_title="GRU: MSE vs Profit-Aware", page_icon="📈", layo
 
 
 def ticker_catalog() -> list[dict]:
-    """Every (symbol, tier) in the thesis benchmark universe, tier by tier."""
-    return [
-        {"symbol": symbol, "tier": tier}
-        for tier in TIER_ORDER
-        for symbol in sorted(PH_TIERED_SYMBOLS[tier])
+    """Every symbol in the thesis benchmark universe: the stocks, then the index."""
+    return [{"symbol": s, "kind": "PSEi stock"} for s in PSEI_STOCKS] + [
+        {"symbol": INDEX_SYMBOL, "kind": "index reference"}
     ]
 
 
@@ -222,7 +220,7 @@ st.caption(
 )
 
 catalog = ticker_catalog()
-labels = [f"{c['symbol'].split(':')[-1]}  ·  {c['tier']}" for c in catalog]
+labels = [f"{c['symbol'].split(':')[-1]}  ·  {c['kind']}" for c in catalog]
 
 with st.sidebar:
     st.header("Setup")

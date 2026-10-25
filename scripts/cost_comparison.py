@@ -52,7 +52,7 @@ from utils.metrics import cumulative_profit, cumulative_profit_geometric, sharpe
 from utils.pipeline import prepare_data
 from utils.trading import PH_BUY_COST, PH_SELL_COST, calibrate_alpha, position_change_cost
 
-# Two symbols per tier of benchmark.PH_TIERED_SYMBOLS (strong / mid / weak).
+# Six PSEi constituents (a subset of benchmark.PSEI_STOCKS) to keep the run short.
 DEFAULT_SYMBOLS = ["PSE:ICT", "PSE:CNPF", "PSE:BDO", "PSE:TEL", "PSE:JFC", "PSE:ALI"]
 CONDITIONS = {
     "mse": "MSE baseline",

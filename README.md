@@ -28,13 +28,10 @@ The study covers the **Philippine Stock Exchange only**:
   minus Maynilad (MYNLD). MYNLD listed in November 2025 and has about 190
   usable samples, too few for a 70/15/15 split. That leaves 29 stocks, plus
   the PSEi itself as a passive reference.
-- **Tiers:** each stock is grouped by its total price return from 2018 to
-  October 2026:
-  - **strong:** return of +25% or more (8 stocks)
-  - **mid:** between -25% and +25% (7 stocks)
-  - **weak:** return of -25% or less (14 stocks)
-
-  The universe and tiers are defined in `benchmark.py` (`PH_TIERED_SYMBOLS`).
+- **Reporting:** the 29 stocks are reported as one group (means and win
+  counts across the stocks). The PSEi is shown separately as a market
+  reference and is never averaged in with the stocks. The universe is defined
+  in `benchmark.py` (`PSEI_STOCKS` and `INDEX_SYMBOL`).
 - **Data:** daily OHLCV from TradingView via `tvDatafeed`. Symbols are written
   as `PSE:TICKER`, for example `PSE:ICT`. Data is cached in `data/` on first
   download.
@@ -88,9 +85,9 @@ It runs four steps in order. All of them use the defaults: 50 epochs, lambda
 
 | # | Command | What it produces (in `results/`) |
 |---|---|---|
-| 1 | `benchmark.py --charts` | `benchmark_summary_ph_<time>.csv`: one row per symbol and loss. `benchmark_summary_ph_<time>_summary.txt`: aggregate, per-tier, win-rate and baseline tables. `benchmark_summary_ph_<time>_charts/`: the figures listed below. |
-| 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: paired t-test (profit-aware minus MSE), overall and per tier, on the latest benchmark CSV |
-| 3 | `scripts/cost_comparison.py` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost. Uses two symbols per tier. |
+| 1 | `benchmark.py --charts` | `benchmark_summary_ph_<time>.csv`: one row per symbol and loss. `benchmark_summary_ph_<time>_summary.txt`: stock means, PSEi reference, win counts and baseline tables. `benchmark_summary_ph_<time>_charts/`: the figures listed below. |
+| 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: paired t-test (profit-aware minus MSE) across the 29 stocks, on the latest benchmark CSV |
+| 3 | `scripts/cost_comparison.py` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost. Uses six of the stocks. |
 | 4 | `main.py --compare --trade-log --symbol PSE:ICT` | Worked example. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
 
 Figures in `_charts/`:
@@ -105,11 +102,11 @@ Figures in `_charts/`:
   MACD
 - `per_symbol_geo_diff.png`: profit-aware minus MSE geometric return, per stock
 
-To redraw figures or retest significance from an existing benchmark CSV,
-without retraining:
+To rebuild the summary, figures or significance test from an existing
+benchmark CSV, without retraining:
 
 ```
-.venv/Scripts/python.exe scripts/plot_loss_comparison.py --csv results/benchmark_summary_ph_<time>.csv
+.venv/Scripts/python.exe benchmark.py --from-csv results/benchmark_summary_ph_<time>.csv --charts
 .venv/Scripts/python.exe scripts/significance.py --csv results/benchmark_summary_ph_<time>.csv
 ```
 
@@ -168,7 +165,7 @@ argument and its default is listed in [docs/arguments.md](docs/arguments.md).
 │   ├── predict.py            # Forecast the next N days with a saved model
 │   ├── significance.py       # Paired t-test, profit-aware minus MSE
 │   ├── cost_comparison.py    # With-cost vs without-cost comparison
-│   └── plot_loss_comparison.py  # Benchmark figures, by tier
+│   └── plot_loss_comparison.py  # Benchmark comparison figures
 ├── models/gru_model.py       # 2-layer GRU -> LayerNorm -> Linear (tanh-bounded head)
 ├── training/train.py         # Training loop, per-epoch metrics, early stopping
 ├── utils/
