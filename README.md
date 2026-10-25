@@ -1,6 +1,6 @@
 # Enhanced GRU via Profit-Aware Loss Learning
 
-A GRU predicts each stock's next-day **return**. The prediction becomes a
+A GRU predicts the PSEi index's next-day **return**. The prediction becomes a
 continuous trading position, and the model is trained on the simulated,
 cost-adjusted profit of that position instead of on prediction error alone.
 An MSE-trained GRU with the same architecture, features and data split is the
@@ -14,27 +14,29 @@ profit_t = signal_t * r_t - cost_t
 Loss     = -mean(profit_t) + lambda * MSE(r_hat, r)  lambda = 0.7
 ```
 
-`alpha = 1 / std(train returns)` is calibrated per stock. The MSE term keeps
-predictions on a realistic scale so that `tanh` does not saturate. The
-original algorithm (Steps 0-11) is in [docs/algorithm.md](docs/algorithm.md)
-and the methodology chapter is in
-[docs/methodology_chapter3.md](docs/methodology_chapter3.md).
+`alpha = 1 / std(train returns)` is calibrated per training window. The MSE
+term keeps predictions on a realistic scale so that `tanh` does not saturate.
+The original algorithm (Steps 0-11) is in [docs/algorithm.md](docs/algorithm.md).
+**The full description of the current system, the evaluation design and the
+latest results is in [docs/system-and-results.md](docs/system-and-results.md)**,
+written as the reference for the thesis write-up.
 
 ## Market and trading costs
 
 The study covers the **Philippine Stock Exchange only**:
 
-- **Universe:** the 30 PSEi constituents as of the 3 August 2026 rebalancing,
-  minus Maynilad (MYNLD). MYNLD listed in November 2025 and has about 190
-  usable samples, too few for a 70/15/15 split. That leaves 29 stocks, plus
-  the PSEi itself as a passive reference.
-- **Reporting:** the 29 stocks are reported as one group (means and win
-  counts across the stocks). The PSEi is shown separately as a market
-  reference and is never averaged in with the stocks. The universe is defined
-  in `benchmark.py` (`PSEI_STOCKS` and `INDEX_SYMBOL`).
+- **Primary series:** the PSEi index itself (`PSE:PSEI`), evaluated with
+  4-fold expanding-window walk-forward validation (four out-of-time test
+  windows, March 2024 to October 2026).
+- **Optional stock universe:** the 30 PSEi constituents as of the 3 August
+  2026 rebalancing, minus Maynilad (MYNLD, listed November 2025, too little
+  history). Run with `--stocks`. Then the 29 stocks are reported as one group
+  and the PSEi separately, never averaged in. Defined in `benchmark.py`
+  (`PSEI_STOCKS`, `INDEX_SYMBOL`).
 - **Data:** daily OHLCV from TradingView via `tvDatafeed`. Symbols are written
-  as `PSE:TICKER`, for example `PSE:ICT`. Data is cached in `data/` on first
-  download.
+  as `PSE:TICKER`, for example `PSE:PSEI` or `PSE:ICT`. Data is cached in
+  `data/` on first download. The PSEi has no volume data (all zeros), so its
+  volume z-score feature is a constant 0.
 
 Trading costs are asymmetric because the stock transaction tax applies only
 to sales:
@@ -79,38 +81,39 @@ One command produces every result and figure:
 .venv/Scripts/python.exe run_thesis.py
 ```
 
-It runs four steps in order. All of them use the defaults: 50 epochs, lambda
-0.7, buy cost 0.296%, sell cost 0.396%, seed 42. With a GPU, expect roughly
-20-30 minutes in total. You can also run any step on its own.
+It runs four steps on the PSEi, in order. All of them use the defaults: 50
+epochs, lambda 0.7, buy cost 0.296%, sell cost 0.396%, seed 42. With a GPU,
+expect roughly 5 minutes in total. You can also run any step on its own.
+`run_thesis.py --stocks` runs the 29-stock version of steps 1-3 instead.
 
 | # | Command | What it produces (in `results/`) |
 |---|---|---|
-| 1 | `benchmark.py --charts` | `benchmark_summary_ph_<time>.csv`: one row per symbol and loss. `benchmark_summary_ph_<time>_summary.txt`: stock means, PSEi reference, win counts and baseline tables. `benchmark_summary_ph_<time>_charts/`: the figures listed below. |
-| 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: paired t-test (profit-aware minus MSE) across the 29 stocks, on the latest benchmark CSV |
-| 3 | `scripts/cost_comparison.py` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost. Uses six of the stocks. |
-| 4 | `main.py --compare --trade-log --symbol PSE:ICT` | Worked example. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
+| 1 | `benchmark.py --walk-forward --folds 4 --charts` | `benchmark_summary_psei_<time>.csv`: one row per fold and loss. `..._daily.csv`: every test day's position and net return for both GRUs, buy & hold and the TA baselines. `..._summary.txt`: means, per-fold table, win counts, baselines, position behaviour, fold stability, degenerate runs. `..._charts/`: the figures listed below. |
+| 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: daily paired test of profit-aware minus MSE (Newey-West standard errors, ~630 test days), hit rate vs 50%, and a fold-level sign test. With a `--stocks` CSV it runs the paired t-test across the 29 stocks instead. |
+| 3 | `scripts/cost_comparison.py --walk-forward --folds 4` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost, on the same 4 folds. |
+| 4 | `main.py --compare --trade-log --symbol PSE:PSEI` | Worked example on the single 70/15/15 split. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
 
-Figures in `_charts/`:
+Figures in `_charts/` (index-only walk-forward run: one bar group per fold,
+plus the mean):
 
-- `profit_comparison.png`
-- `profit_geo_comparison.png`
-- `buy_hold_comparison.png`
-- `sharpe_comparison.png`
-- `rmse_comparison.png`
-- `directional_acc_comparison.png`
+- `profit_comparison.png`, `profit_geo_comparison.png`, `buy_hold_comparison.png`
+- `sharpe_comparison.png`, `rmse_comparison.png`, `directional_acc_comparison.png`
 - `strategy_comparison.png`: MSE vs profit-aware vs buy & hold vs SMA, RSI and
-  MACD
-- `per_symbol_geo_diff.png`: profit-aware minus MSE geometric return, per stock
+  MACD, mean over the folds
+- `per_fold_geo_diff.png`: profit-aware minus MSE geometric return, per fold
+- `equity_curve.png`: growth of 1 PHP over the whole out-of-sample period
+  (folds stitched end to end) for every model and baseline
+- `per_symbol_geo_diff.png`: per stock (only in a `--stocks` run)
 
 To rebuild the summary, figures or significance test from an existing
 benchmark CSV, without retraining:
 
 ```
-.venv/Scripts/python.exe benchmark.py --from-csv results/benchmark_summary_ph_<time>.csv --charts
-.venv/Scripts/python.exe scripts/significance.py --csv results/benchmark_summary_ph_<time>.csv
+.venv/Scripts/python.exe benchmark.py --from-csv results/benchmark_summary_psei_<time>.csv --charts
+.venv/Scripts/python.exe scripts/significance.py --csv results/benchmark_summary_psei_<time>.csv
 ```
 
-Both scripts default to the newest `results/benchmark_summary_ph_*.csv` when
+Both scripts default to the newest `results/benchmark_summary_*.csv` when
 `--csv` is omitted.
 
 ## Metrics
@@ -124,24 +127,30 @@ Both scripts default to the newest `results/benchmark_summary_ph_*.csv` when
 | MSE / MAE / RMSE | Error of the predicted daily return |
 | Buy & hold | `prod(1 + r_t) - 1` over the test window, no costs (reference only) |
 | Degenerate run | The position never changes side over the whole test window. The model learned no day-to-day signal. |
+| Mean position / mean \|position\| / turnover | Average signed position, average position size, and average daily position change. A mean position close to ± the mean size means the model sits on one side of the market. |
 
 ## Other entry points
 
-All entry points use the same data pipeline (`utils/pipeline.py`) and the same
-chronological 70/15/15 split, so the test window is always identical.
+All entry points use the same data pipeline (`utils/pipeline.py`). Without
+`--walk-forward` they use the same chronological 70/15/15 split, so the test
+window is always identical. Every entry point defaults to `PSE:PSEI`.
 
 ```
-# Train + evaluate one stock (one loss, or both with --compare)
+# Train + evaluate the PSEi (one loss, or both with --compare); --symbol for a stock
+.venv/Scripts/python.exe main.py --compare --trade-log
 .venv/Scripts/python.exe main.py --symbol PSE:BDO --compare --trade-log
 
-# Benchmark a subset, or with walk-forward validation
-.venv/Scripts/python.exe benchmark.py --symbols PSE:ICT,PSE:BDO --epochs 30
+# Benchmark: PSEi only (default), single split or walk-forward;
+# all constituents + the index (--stocks); or a custom list
 .venv/Scripts/python.exe benchmark.py --walk-forward --folds 4 --charts
+.venv/Scripts/python.exe benchmark.py --charts
+.venv/Scripts/python.exe benchmark.py --stocks --charts
+.venv/Scripts/python.exe benchmark.py --symbols PSE:ICT,PSE:BDO --epochs 30
 
 # Train only (test set untouched), then evaluate, then forecast
-.venv/Scripts/python.exe scripts/train.py --symbol PSE:ICT --loss profit-aware
-.venv/Scripts/python.exe scripts/evaluate.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_<END>.pt --trade-log
-.venv/Scripts/python.exe scripts/predict.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_<END>.pt --days 5
+.venv/Scripts/python.exe scripts/train.py --loss profit-aware
+.venv/Scripts/python.exe scripts/evaluate.py --model results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_<END>.pt --trade-log
+.venv/Scripts/python.exe scripts/predict.py --model results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_<END>.pt --days 5
 
 # Live demo: train both models on a chosen ticker and compare trade logs
 streamlit run webapp.py
@@ -149,21 +158,21 @@ streamlit run webapp.py
 
 Saved models and curves are named `<SYMBOL>_<loss>_<start>_<end>`. The `:`
 in the symbol becomes `-`, for example
-`results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt`. Every
+`results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_2026-10-23.pt`. Every
 argument and its default is listed in [docs/arguments.md](docs/arguments.md).
 
 ## Project structure
 
 ```
 ├── run_thesis.py             # Runs every thesis step (see "Thesis run")
-├── main.py                   # Train + evaluate one stock (--compare for both losses)
-├── benchmark.py              # MSE vs profit-aware across the PSEi universe
+├── main.py                   # Train + evaluate one symbol (--compare for both losses)
+├── benchmark.py              # MSE vs profit-aware on the PSEi (or --stocks universe)
 ├── webapp.py                 # Streamlit live demo
 ├── scripts/
 │   ├── train.py              # Train only, save the model
 │   ├── evaluate.py           # Evaluate a saved model on the test set
 │   ├── predict.py            # Forecast the next N days with a saved model
-│   ├── significance.py       # Paired t-test, profit-aware minus MSE
+│   ├── significance.py       # Profit-aware minus MSE significance tests
 │   ├── cost_comparison.py    # With-cost vs without-cost comparison
 │   └── plot_loss_comparison.py  # Benchmark comparison figures
 ├── models/gru_model.py       # 2-layer GRU -> LayerNorm -> Linear (tanh-bounded head)

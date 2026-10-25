@@ -26,6 +26,14 @@ drifts. This file is about pitfalls that aren't obvious from the code alone.
   history) plus `PSE:PSEI` as reference — `benchmark.py::PSEI_STOCKS` /
   `INDEX_SYMBOL`. Stocks are reported as one group (no tiers); the index is
   always reported separately and kept out of stock means and the t-test.
+  **The study is now index-first**: every entry point defaults to `PSE:PSEI`,
+  `run_thesis.py` evaluates it with 4-fold walk-forward, and `--stocks`
+  (on `benchmark.py`, `cost_comparison.py`, `run_thesis.py`) brings back the
+  29-stock universe. Index-only CSVs are `benchmark_summary_psei_*.csv`, full
+  ones `_ph_*`; `latest_csv()` picks the newest of either by mtime.
+  `significance.py`, the charts and the summary all branch on "are there
+  stock rows?" -- keep that branch when changing any of them.
+  `docs/system-and-results.md` is the current full write-up.
   US tickers were dropped; older `results/` and `docs/run-result*.md` may
   still describe US runs.
 - Symbols are `PSE:TICKER` (routed to tvDatafeed). The `:` is illegal in

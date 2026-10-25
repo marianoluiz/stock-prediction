@@ -16,7 +16,7 @@ the test window is identical between them.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--symbol` | `str` | `PSE:ICT` | PSE ticker in `EXCHANGE:TICKER` form (e.g. `PSE:ICT`, `PSE:BDO`, `PSE:PSEI`). Fetched from TradingView via `tvDatafeed`. The study universe is `benchmark.py`'s `PSEI_STOCKS` plus `INDEX_SYMBOL`. |
+| `--symbol` | `str` | `PSE:PSEI` | PSE ticker in `EXCHANGE:TICKER` form (e.g. `PSE:PSEI`, `PSE:ICT`, `PSE:BDO`). Fetched from TradingView via `tvDatafeed`. The study's primary series is the PSEi index (`benchmark.py`'s `INDEX_SYMBOL`); the optional stock universe is `PSEI_STOCKS`. |
 | `--start` | `str` | `2018-01-01` | Start date for historical data (`YYYY-MM-DD`). |
 | `--end` | `str` | `None` | End date for historical data. If `None`, uses up to today. |
 
@@ -64,7 +64,7 @@ This ensures both MSE and profit-aware models receive identical position sizing,
 ### main.py — everything in one run
 
 ```bash
-# Default (PSE:ICT with profit-aware loss)
+# Default (PSE:PSEI with profit-aware loss)
 python main.py
 
 # Run MSE baseline only
@@ -86,11 +86,11 @@ python main.py --symbol PSE:ALI --hidden-size 128 --num-layers 3 --epochs 100
 ### train.py — train only, save a model
 
 Models and curves are named with the symbol + date range (the actual last date
-is filled in automatically, and `:` becomes `-`, e.g. `PSE-ICT_profit_aware_2018-01-01_2026-10-23`):
+is filled in automatically, and `:` becomes `-`, e.g. `PSE-PSEI_profit_aware_2018-01-01_2026-10-23`):
 
 ```bash
 # Train the default profit-aware model
-#   saves to results/profit_aware/PSE-ICT_profit_aware_2018-01-01_<END>.pt
+#   saves to results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_<END>.pt
 python scripts/train.py
 
 # Custom save path (curves still go next to it, named with symbol + range)
@@ -100,25 +100,25 @@ python scripts/train.py --symbol PSE:JFC --hidden-size 128 --epochs 100 --save m
 ### evaluate.py — test a saved model on the held-out test set
 
 ```bash
-# Evaluate the default profit-aware model on ICT's test window
-python scripts/evaluate.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt
+# Evaluate the default profit-aware model on the PSEi's test window
+python scripts/evaluate.py --model results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_2026-10-23.pt
 
 # Evaluate an MSE baseline with a trade log + save a metrics summary file
-python scripts/evaluate.py --model results/mse/PSE-ICT_mse_2018-01-01_2026-10-23.pt --loss mse --trade-log --metrics-out results/mse/PSE-ICT_mse_metrics.txt
+python scripts/evaluate.py --model results/mse/PSE-PSEI_mse_2018-01-01_2026-10-23.pt --loss mse --trade-log --metrics-out results/mse/PSE-PSEI_mse_metrics.txt
 
 # Evaluate on a different ticker (uses that ticker's test window)
-python scripts/evaluate.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt --symbol PSE:BDO --capital 50000
+python scripts/evaluate.py --model results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_2026-10-23.pt --symbol PSE:BDO --capital 50000
 ```
 
 ### predict.py — forecast the next N days (defense demo)
 
 ```bash
-# Forecast 5 trading days after the latest ICT data
-python scripts/predict.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt
+# Forecast 5 trading days after the latest PSEi data
+python scripts/predict.py --model results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_2026-10-23.pt
 
 # 10 days on a different stock
 python scripts/predict.py --model models/jfc_pa.pt --symbol PSE:JFC --days 10
 
 # Use a different history window as the seed
-python scripts/predict.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt --symbol PSE:ICT --days 7 --sequence-length 30
+python scripts/predict.py --model results/profit_aware/PSE-PSEI_profit_aware_2018-01-01_2026-10-23.pt --symbol PSE:PSEI --days 7 --sequence-length 30
 ```

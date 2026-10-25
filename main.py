@@ -31,6 +31,7 @@ def run_single(
 ) -> tuple[dict, dict]:
     """Train one model with the given loss type and return (history, test_metrics)."""
     output_scale = (args.output_cap_std / args.alpha) if args.output_cap_std > 0 else None
+    torch.manual_seed(args.seed)
     model = GRUReturnPredictor(
         input_size=split.x_train.shape[-1],
         hidden_size=args.hidden_size,
@@ -123,7 +124,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Enhanced GRU with Profit-Aware Loss and Transaction Costs")
 
     #  Data
-    parser.add_argument("--symbol", type=str, default="PSE:ICT",           help="PSE ticker as EXCHANGE:TICKER (e.g. PSE:ICT, PSE:BDO), fetched via tvDatafeed")
+    parser.add_argument("--symbol", type=str, default="PSE:PSEI",          help="PSE ticker as EXCHANGE:TICKER (default: the PSEi index; e.g. PSE:ICT for a stock), fetched via tvDatafeed")
     parser.add_argument("--start", type=str, default="2018-01-01",         help="Start date for historical data (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default=None,                   help="End date for historical data (default: latest available)")
     parser.add_argument("--sequence-length", type=int, default=30,         help="Number of past days used as input for each sample (lookback window)")
@@ -150,6 +151,7 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3,                  help="Adam optimizer learning rate")
     parser.add_argument("--weight-decay", type=float, default=1e-3,        help="AdamW weight decay; caps pred magnitude from diverging when chasing tanh saturation")
     parser.add_argument("--output-cap-std", type=float, default=5.0,       help="Hard-bound predicted return to +-N std devs of train returns via a tanh head (0 = unbounded)")
+    parser.add_argument("--seed", type=int, default=42,                    help="Seed for model weight initialisation (same default as benchmark.py)")
     parser.add_argument("--early-stop-patience", type=int, default=0,      help="Stop training if --early-stop-metric doesn't improve for this many epochs (0 = disabled, train the full --epochs). Restores the best-epoch weights before saving.")
     parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
     parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"],

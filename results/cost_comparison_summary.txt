@@ -1,19 +1,20 @@
+Mean over 4 test window(s): PSEI f0, PSEI f1, PSEI f2, PSEI f3
 
 === WITHOUT cost (evaluated at zero cost) ===
 condition                           GeoRet    AddRet   Sharpe  Turnover   Final PHP
-MSE baseline                       +0.0426   +0.0422   +0.617    0.0631     104,255
-Profit-aware, cost not in loss     +0.2060   +0.1947   +0.597    0.4393     120,602
-Profit-aware, cost in loss         +0.2501   +0.2264   +0.852    0.1175     125,006
+MSE baseline                       -0.0015   -0.0014   -0.111    0.0033      99,846
+Profit-aware, cost not in loss     +0.0079   +0.0085   +0.486    0.0248     100,789
+Profit-aware, cost in loss         +0.0113   +0.0125   +0.318    0.0030     101,132
 
 === WITH cost (evaluated at buy 0.296%, sell 0.396%) ===
 condition                           GeoRet    AddRet   Sharpe  Turnover   Final PHP
-MSE baseline                       -0.0279   -0.0268   -0.296    0.0631      97,212
-Profit-aware, cost not in loss     -0.2412   -0.2857   -0.998    0.4393      75,875
-Profit-aware, cost in loss         +0.0900   +0.0979   +0.330    0.1175     109,001
+MSE baseline                       -0.0033   -0.0032   -0.284    0.0033      99,667
+Profit-aware, cost not in loss     -0.0057   -0.0051   -0.507    0.0248      99,427
+Profit-aware, cost in loss         +0.0095   +0.0107   +0.273    0.0030     100,948
 
-=== Cost drag on geometric return (no-cost minus with-cost), mean over symbols ===
-MSE baseline                       +0.0704
-Profit-aware, cost not in loss     +0.4473
-Profit-aware, cost in loss         +0.1600
+=== Cost drag on geometric return (no-cost minus with-cost), mean over test windows ===
+MSE baseline                       +0.0018
+Profit-aware, cost not in loss     +0.0136
+Profit-aware, cost in loss         +0.0018
 
-With cost: pa_cost beats pa_nocost on 5/6 symbols, beats MSE on 4/6
+With cost: pa_cost beats pa_nocost on 4/4 test windows, beats MSE on 3/4

@@ -6,7 +6,7 @@ Reuses the exact same data pipeline, model, and training loop as
 numbers shown here match what the CLI would produce for identical
 arguments. Data is loaded from the CSV caches under data/ -- once
 benchmark.py has run, every ticker in the thesis universe (the PSEi
-constituents and the index, see benchmark.py's DEFAULT_SYMBOLS) has one, so no network
+constituents and the index, see benchmark.py's ALL_SYMBOLS) has one, so no network
 access is needed for a live defense demo.
 
 Run with:
@@ -50,9 +50,10 @@ st.set_page_config(page_title="GRU: MSE vs Profit-Aware", page_icon="📈", layo
 
 
 def ticker_catalog() -> list[dict]:
-    """Every symbol in the thesis benchmark universe: the stocks, then the index."""
-    return [{"symbol": s, "kind": "PSEi stock"} for s in PSEI_STOCKS] + [
-        {"symbol": INDEX_SYMBOL, "kind": "index reference"}
+    """Every symbol in the thesis universe: the PSEi index (the primary series,
+    selected by default), then the constituent stocks."""
+    return [{"symbol": INDEX_SYMBOL, "kind": "PSEi index"}] + [
+        {"symbol": s, "kind": "PSEi stock"} for s in PSEI_STOCKS
     ]
 
 
