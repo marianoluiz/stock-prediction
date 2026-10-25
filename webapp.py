@@ -4,9 +4,10 @@ inspect the resulting trade log side by side.
 Reuses the exact same data pipeline, model, and training loop as
 ``main.py --compare --trade-log`` (same defaults as benchmark.py), so the
 numbers shown here match what the CLI would produce for identical
-arguments. Data is loaded from the CSV caches under data/ -- every ticker
-in the thesis benchmark universe (see benchmark.py's MARKETS) already has
-one, so no network access is needed for a live defense demo.
+arguments. Data is loaded from the CSV caches under data/ -- once
+benchmark.py has run, every ticker in the thesis universe (the PSEi
+constituents, see benchmark.py's PH_TIERED_SYMBOLS) has one, so no network
+access is needed for a live defense demo.
 
 Run with:
 
@@ -28,7 +29,7 @@ import pandas as pd
 import streamlit as st
 import torch
 
-from benchmark import MARKETS, buy_and_hold_return, is_degenerate_signal
+from benchmark import PH_TIERED_SYMBOLS, TIER_ORDER, buy_and_hold_return, is_degenerate_signal
 from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit, run_epoch
 from utils.baselines import evaluate_price_strategies
@@ -36,29 +37,25 @@ from utils.metrics import running_balance, sharpe_like, trade_log_records
 from utils.pipeline import cache_path_for, prepare_data
 from utils.preprocessing import load_stock_data
 from utils.plotting import format_date
-from utils.trading import calibrate_alpha
+from utils.chart_style import COLOR_MSE, COLOR_PA, COLOR_REF, INK, apply_style
+from utils.trading import PH_BUY_COST, PH_SELL_COST, calibrate_alpha
 
 STRATEGY_LABELS = {"sma_crossover": "SMA Crossover", "rsi": "RSI", "macd": "MACD"}
 
-# Palette (validated categorical slots 1/2 + muted reference gray -- see
-# dataviz skill): blue = MSE, orange = Profit-Aware, gray = Buy & Hold.
-COLOR_MSE = "#2a78d6"
-COLOR_PA = "#eb6834"
-COLOR_REF = "#898781"
-INK = "#0b0b0b"
-GRID = "#e1e0d9"
+# Shared thesis palette (utils.chart_style): blue = MSE, orange = Profit-Aware,
+# gray = Buy & Hold. The three TA baselines are secondary context on the
+# balance chart only.
 
 st.set_page_config(page_title="GRU: MSE vs Profit-Aware", page_icon="📈", layout="wide")
 
 
 def ticker_catalog() -> list[dict]:
-    """Every (symbol, market, tier) in the thesis benchmark universe."""
-    catalog = []
-    for market_name, tiers in MARKETS.items():
-        for tier_name, symbols in tiers.items():
-            for symbol in symbols:
-                catalog.append({"symbol": symbol, "market": market_name.upper(), "tier": tier_name})
-    return sorted(catalog, key=lambda c: (c["market"], c["tier"], c["symbol"]))
+    """Every (symbol, tier) in the thesis benchmark universe, tier by tier."""
+    return [
+        {"symbol": symbol, "tier": tier}
+        for tier in TIER_ORDER
+        for symbol in sorted(PH_TIERED_SYMBOLS[tier])
+    ]
 
 
 def run_side(loss_type: str, data, alpha: float, device: torch.device, cfg: dict) -> dict:
@@ -79,7 +76,8 @@ def run_side(loss_type: str, data, alpha: float, device: torch.device, cfg: dict
         loss_type=loss_type,
         alpha=alpha,
         loss_lambda=cfg["loss_lambda"],
-        transaction_cost_rate=cfg["transaction_cost"],
+        buy_cost_rate=cfg["buy_cost"],
+        sell_cost_rate=cfg["sell_cost"],
         learning_rate=cfg["lr"],
         weight_decay=cfg["weight_decay"],
         batch_size=64,
@@ -88,12 +86,12 @@ def run_side(loss_type: str, data, alpha: float, device: torch.device, cfg: dict
     fit(model, data.train_loader, data.val_loader, config, device, capital=cfg["capital"])
 
     test_metrics = run_epoch(
-        model, data.test_loader, None, alpha, cfg["transaction_cost"], device, loss_type=loss_type,
+        model, data.test_loader, None, alpha, cfg["buy_cost"], cfg["sell_cost"], device, loss_type=loss_type,
     )
     test_metrics["degenerate"] = is_degenerate_signal(test_metrics["signal_np"])
     records, summary = trade_log_records(
         test_metrics["signal_np"], test_metrics["actual_np"], test_metrics["pred_np"],
-        split.dates_test, cfg["capital"], transaction_cost_rate=cfg["transaction_cost"],
+        split.dates_test, cfg["capital"], buy_cost_rate=cfg["buy_cost"], sell_cost_rate=cfg["sell_cost"],
     )
     test_metrics["records"] = records
     test_metrics["summary"] = summary
@@ -120,10 +118,10 @@ def run_comparison(symbol: str, cfg: dict) -> dict:
     price_df = load_stock_data(symbol, cfg["start"], None, cache_path_for(symbol, cfg["start"], None))
     strategies = evaluate_price_strategies(
         price_df["Close"], data.split.dates_test, mse_metrics["actual_np"],
-        transaction_cost_rate=cfg["transaction_cost"],
+        buy_cost_rate=cfg["buy_cost"], sell_cost_rate=cfg["sell_cost"],
     )
     strategy_balances = {
-        name: running_balance(m["signal"], mse_metrics["actual_np"], cfg["capital"], cfg["transaction_cost"])
+        name: running_balance(m["signal"], mse_metrics["actual_np"], cfg["capital"], cfg["buy_cost"], cfg["sell_cost"])
         for name, m in strategies.items()
     }
 
@@ -170,19 +168,13 @@ def comparison_figure(mse: dict, pa: dict):
         ("cum_profit_geo", "Geometric Return", "{:.1%}"),
         ("sharpe_like", "Sharpe-like Ratio", "{:.2f}"),
     ]
-    fig, axes = plt.subplots(1, 4, figsize=(15, 3.2), facecolor="#fcfcfb")
+    apply_style()
+    fig, axes = plt.subplots(1, 4, figsize=(15, 3.2))
     for ax, (key, label, fmt) in zip(axes, specs):
-        ax.set_facecolor("#fcfcfb")
         vals = [mse[key], pa[key]]
         bars = ax.bar(["MSE", "Profit-Aware"], vals, width=0.55, color=[COLOR_MSE, COLOR_PA])
-        ax.axhline(0, color=INK, linewidth=0.8)
-        for spine in ("top", "right", "left"):
-            ax.spines[spine].set_visible(False)
-        ax.spines["bottom"].set_color(GRID)
-        ax.tick_params(colors=INK, length=0)
-        ax.yaxis.grid(True, color=GRID, linewidth=0.8)
-        ax.set_axisbelow(True)
-        ax.set_title(label, fontsize=10, color=INK)
+        ax.axhline(0, color=COLOR_REF, linewidth=0.9)
+        ax.set_title(label, fontsize=10)
         for b, v in zip(bars, vals):
             ax.annotate(
                 fmt.format(v), (b.get_x() + b.get_width() / 2, v),
@@ -230,7 +222,7 @@ st.caption(
 )
 
 catalog = ticker_catalog()
-labels = [f"{c['symbol']}  ·  {c['market']} / {c['tier']}" for c in catalog]
+labels = [f"{c['symbol'].split(':')[-1]}  ·  {c['tier']}" for c in catalog]
 
 with st.sidebar:
     st.header("Setup")
@@ -244,7 +236,8 @@ with st.sidebar:
         num_layers = st.number_input("GRU layers", 1, 4, 2)
         dropout = st.slider("Dropout", 0.0, 0.6, 0.2, step=0.05)
         capital = st.number_input("Capital (PHP)", 1_000.0, 10_000_000.0, 100_000.0, step=10_000.0)
-        transaction_cost = st.number_input("Transaction cost rate", 0.0, 0.05, 0.001, step=0.0005, format="%.4f")
+        buy_cost = st.number_input("Buy cost rate (commission, VAT, PSE/SCCP fees)", 0.0, 0.05, PH_BUY_COST, step=0.0001, format="%.5f")
+        sell_cost = st.number_input("Sell cost rate (buy-side fees + 0.1% stock transaction tax)", 0.0, 0.05, PH_SELL_COST, step=0.0001, format="%.5f")
         loss_lambda = st.number_input("Profit-aware MSE weight (lambda)", 0.0, 5.0, 0.7, step=0.1)
         seed = st.number_input("Random seed", 0, 10_000, 42)
 
@@ -258,7 +251,8 @@ cfg = dict(
     num_layers=int(num_layers),
     dropout=float(dropout),
     capital=float(capital),
-    transaction_cost=float(transaction_cost),
+    buy_cost=float(buy_cost),
+    sell_cost=float(sell_cost),
     loss_lambda=float(loss_lambda),
     output_cap_std=5.0,
     lr=1e-3,
@@ -291,7 +285,10 @@ info_cols[1].metric("Test Window End", format_date(split.dates_test[-1]))
 info_cols[2].metric("Trading Days", f"{len(split.dates_test)}")
 info_cols[3].metric("Alpha", f"{result['alpha']:.4f}")
 
-st.caption(f"Trained in {st.session_state.get('elapsed', 0):.1f}s on {_device()}")
+st.caption(
+    f"Trained in {st.session_state.get('elapsed', 0):.1f}s on {_device()} · "
+    f"costs: buy {cfg['buy_cost']:.3%}, sell {cfg['sell_cost']:.3%} per unit of position change"
+)
 
 col_mse, col_pa, col_bh = st.columns(3)
 metric_card(col_mse, "MSE Baseline", mse, capital)

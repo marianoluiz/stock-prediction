@@ -5,9 +5,9 @@ All arguments are optional and have sensible defaults.
 There are now three entry points:
 
 - `main.py` — everything in one run (train + evaluate + compare)
-- `train.py` — train only (test set untouched)
-- `evaluate.py` — evaluate a saved model on the test set
-- `predict.py` — forecast the next N days with a saved model
+- `scripts/train.py` — train only (test set untouched)
+- `scripts/evaluate.py` — evaluate a saved model on the test set
+- `scripts/predict.py` — forecast the next N days with a saved model
 
 `train.py` and `evaluate.py` use the exact same chronological 70/15/15 split, so
 the test window is identical between them.
@@ -16,7 +16,7 @@ the test window is identical between them.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--symbol` | `str` | `AAPL` | Stock ticker symbol (e.g. `AAPL`, `MSFT`, `GOOGL`). Passed directly to Yahoo Finance. |
+| `--symbol` | `str` | `PSE:ICT` | PSE ticker in `EXCHANGE:TICKER` form (e.g. `PSE:ICT`, `PSE:BDO`, `PSE:PSEI`). Fetched from TradingView via `tvDatafeed`. The study universe is `benchmark.py`'s `PH_TIERED_SYMBOLS`. |
 | `--start` | `str` | `2018-01-01` | Start date for historical data (`YYYY-MM-DD`). |
 | `--end` | `str` | `None` | End date for historical data. If `None`, uses up to today. |
 
@@ -45,7 +45,8 @@ the test window is identical between them.
 | `--compare` | flag | `False` | Run both loss functions and print a side-by-side comparison table. |
 | `--alpha` | `float` | `1.0` | Sharpness of tanh signal: higher = more aggressive binary-like positioning. |
 | `--loss-lambda` | `float` | `0.7` | Weight of the MSE calibration term added to the profit-aware loss. `0` = pure profit loss `-mean(net_profit)`. Larger values add MSE calibration, which prevents gradient saturation but steers the model toward an MSE-like fit. |
-| `--transaction-cost` | `float` | `0.001` | Simulated trading cost per trade as a rate (0.001 = 0.1%). |
+| `--buy-cost` | `float` | `0.00296` | Cost per unit of position increase, i.e. a purchase (0.296%: PSE broker commission 0.25% + 12% VAT on it + PSE/SCCP fees). |
+| `--sell-cost` | `float` | `0.00396` | Cost per unit of position decrease, i.e. a sale (0.396%: the buy-side fees + 0.1% stock transaction tax). |
 | `--capital` | `float` | `100000.0` | Starting capital in PHP for simulated trading display. Converts percentage returns to PHP amounts in output. |
 
 ## Signal Conversion (Evaluation)
@@ -63,7 +64,7 @@ This ensures both MSE and profit-aware models receive identical position sizing,
 ### main.py — everything in one run
 
 ```bash
-# Default (AAPL with profit-aware loss)
+# Default (PSE:ICT with profit-aware loss)
 python main.py
 
 # Run MSE baseline only
@@ -73,51 +74,51 @@ python main.py --loss mse
 python main.py --loss profit-aware
 
 # Run both and print comparison table
-python main.py --compare --symbol AAPL --epochs 50
+python main.py --compare --symbol PSE:BDO --epochs 50
 
 # Different stock
-python main.py --symbol MSFT --start 2015-01-01
+python main.py --symbol PSE:JFC --start 2015-01-01
 
 # Custom training
-python main.py --symbol GOOGL --hidden-size 128 --num-layers 3 --epochs 100
+python main.py --symbol PSE:ALI --hidden-size 128 --num-layers 3 --epochs 100
 ```
 
 ### train.py — train only, save a model
 
 Models and curves are named with the symbol + date range (the actual last date
-is filled in automatically, e.g. `AAPL_profit_aware_2018-01-01_2026-08-17`):
+is filled in automatically, and `:` becomes `-`, e.g. `PSE-ICT_profit_aware_2018-01-01_2026-10-23`):
 
 ```bash
 # Train the default profit-aware model
-#   saves to results/profit_aware/AAPL_profit_aware_2018-01-01_<END>.pt
-python train.py
+#   saves to results/profit_aware/PSE-ICT_profit_aware_2018-01-01_<END>.pt
+python scripts/train.py
 
 # Custom save path (curves still go next to it, named with symbol + range)
-python train.py --symbol NVDA --hidden-size 128 --epochs 100 --save models/nvda_pa.pt
+python scripts/train.py --symbol PSE:JFC --hidden-size 128 --epochs 100 --save models/jfc_pa.pt
 ```
 
 ### evaluate.py — test a saved model on the held-out test set
 
 ```bash
-# Evaluate the default profit-aware model on AAPL's test window
-python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt
+# Evaluate the default profit-aware model on ICT's test window
+python scripts/evaluate.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt
 
 # Evaluate an MSE baseline with a trade log + save a metrics summary file
-python evaluate.py --model results/mse/AAPL_mse_2018-01-01_2026-08-17.pt --loss mse --trade-log --metrics-out results/mse/AAPL_mse_metrics.txt
+python scripts/evaluate.py --model results/mse/PSE-ICT_mse_2018-01-01_2026-10-23.pt --loss mse --trade-log --metrics-out results/mse/PSE-ICT_mse_metrics.txt
 
 # Evaluate on a different ticker (uses that ticker's test window)
-python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt --symbol GOOGL --capital 50000
+python scripts/evaluate.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt --symbol PSE:BDO --capital 50000
 ```
 
 ### predict.py — forecast the next N days (defense demo)
 
 ```bash
-# Forecast 5 trading days after the latest AAPL data
-python predict.py --model results/profit_aware/gru_profit_aware.pt
+# Forecast 5 trading days after the latest ICT data
+python scripts/predict.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt
 
 # 10 days on a different stock
-python predict.py --model models/nvda_pa.pt --symbol NVDA --days 10
+python scripts/predict.py --model models/jfc_pa.pt --symbol PSE:JFC --days 10
 
 # Use a different history window as the seed
-python predict.py --model results/profit_aware/gru_profit_aware.pt --symbol MSFT --days 7 --sequence-length 30
+python scripts/predict.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt --symbol PSE:ICT --days 7 --sequence-length 30
 ```

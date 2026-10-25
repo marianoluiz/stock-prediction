@@ -39,7 +39,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Forecast the next N days after the latest data")
 
     parser.add_argument("--model", type=str, required=True,                help="Path to saved model weights (.pt)")
-    parser.add_argument("--symbol", type=str, default="AAPL",              help="Stock ticker symbol (e.g. AAPL, MSFT)")
+    parser.add_argument("--symbol", type=str, default="PSE:ICT",           help="PSE ticker as EXCHANGE:TICKER (e.g. PSE:ICT, PSE:BDO), fetched via tvDatafeed")
     parser.add_argument("--start", type=str, default="2018-01-01",         help="Start date for historical data (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default=None,                   help="End date for historical data (default: latest available)")
     parser.add_argument("--days", type=int, default=5,                     help="Number of future trading days to forecast")

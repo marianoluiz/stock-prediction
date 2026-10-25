@@ -21,6 +21,7 @@ from utils.metrics import (
     directional_accuracy,
     sharpe_like,
 )
+from utils.trading import PH_BUY_COST, PH_SELL_COST, position_change_cost
 
 
 def sma_crossover_signal(close: pd.Series, fast: int = 10, slow: int = 50) -> pd.Series:
@@ -81,7 +82,8 @@ def evaluate_price_strategies(
     close: pd.Series,
     dates_test: np.ndarray,
     actual_return_test: np.ndarray,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> dict[str, dict[str, float | np.ndarray]]:
     """Score every strategy in :data:`STRATEGIES` on the same test window and
     metrics the GRU models are scored on.
@@ -95,14 +97,14 @@ def evaluate_price_strategies(
         signal = strategy_signal_on_dates(close, fn, dates_test)
 
         previous_signal = np.concatenate(([0.0], signal[:-1]))
-        costs = transaction_cost_rate * np.abs(signal - previous_signal)
+        costs = position_change_cost(signal, previous_signal, buy_cost_rate, sell_cost_rate)
         profit = signal * actual_return_test - costs
 
         results[name] = {
             "signal": signal,
             "directional_acc": directional_accuracy(signal, actual_return_test),
-            "cum_profit": cumulative_profit(signal, actual_return_test, transaction_cost_rate),
-            "cum_profit_geo": cumulative_profit_geometric(signal, actual_return_test, transaction_cost_rate),
+            "cum_profit": cumulative_profit(signal, actual_return_test, buy_cost_rate, sell_cost_rate),
+            "cum_profit_geo": cumulative_profit_geometric(signal, actual_return_test, buy_cost_rate, sell_cost_rate),
             "sharpe_like": sharpe_like(profit),
         }
 

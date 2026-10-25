@@ -21,7 +21,7 @@ from models.gru_model import GRUReturnPredictor
 from training.train import TrainingConfig, fit
 from utils.pipeline import prepare_data
 from utils.plotting import format_date, plot_history
-from utils.trading import calibrate_alpha
+from utils.trading import PH_BUY_COST, PH_SELL_COST, calibrate_alpha
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train a GRU model (test set is left untouched)")
 
     # Data
-    parser.add_argument("--symbol", type=str, default="AAPL",              help="Stock ticker symbol (e.g. AAPL, MSFT)")
+    parser.add_argument("--symbol", type=str, default="PSE:ICT",           help="PSE ticker as EXCHANGE:TICKER (e.g. PSE:ICT, PSE:BDO), fetched via tvDatafeed")
     parser.add_argument("--start", type=str, default="2018-01-01",         help="Start date for historical data (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default=None,                   help="End date for historical data (default: latest available)")
     parser.add_argument("--sequence-length", type=int, default=30,         help="Number of past days used as input for each sample (lookback window)")
@@ -44,7 +44,8 @@ def main() -> None:
                         help="Loss function: 'mse' (baseline) or 'profit-aware' (custom)")
     parser.add_argument("--alpha", type=float, default=None,               help="Sharpness of tanh signal: higher = more aggressive binary-like positioning (default: auto-calibrated as 1/std(train_returns) so a 1-std move maps to tanh~=0.76)")
     parser.add_argument("--loss-lambda", type=float, default=0.7,          help="Weight of the MSE calibration term in the profit-aware loss (0 = pure profit, larger = more calibration; 0 lets pred drift unbounded and saturate tanh, see TODO.md)")
-    parser.add_argument("--transaction-cost", type=float, default=0.001,   help="Transaction cost rate per unit of signal change (0.001 = 0.1%% per trade)")
+    parser.add_argument("--buy-cost", type=float, default=PH_BUY_COST,      help="Cost rate per unit of position increase, i.e. a purchase (default 0.00296 = 0.296%%: PSE commission + VAT + PSE/SCCP fees)")
+    parser.add_argument("--sell-cost", type=float, default=PH_SELL_COST,    help="Cost rate per unit of position decrease, i.e. a sale (default 0.00396 = 0.396%%: buy-side fees + 0.1%% stock transaction tax)")
     parser.add_argument("--capital", type=float, default=100_000.0,        help="Starting capital in PHP for simulated trading display")
 
     # Training
@@ -86,7 +87,8 @@ def main() -> None:
         loss_type=args.loss,
         alpha=args.alpha,
         loss_lambda=args.loss_lambda,
-        transaction_cost_rate=args.transaction_cost,
+        buy_cost_rate=args.buy_cost,
+        sell_cost_rate=args.sell_cost,
         learning_rate=args.lr,
         batch_size=args.batch_size,
         epochs=args.epochs,
@@ -104,7 +106,7 @@ def main() -> None:
 
     loss_key = args.loss.replace("-", "_")
     end_actual = format_date(data.dates[-1])
-    tag = f"{args.symbol}_{loss_key}_{args.start}_{end_actual}"
+    tag = f"{args.symbol.replace(':', '-')}_{loss_key}_{args.start}_{end_actual}"
 
     save_path = Path(args.save) if args.save else Path("results") / loss_key / f"{tag}.pt"
     save_path.parent.mkdir(parents=True, exist_ok=True)

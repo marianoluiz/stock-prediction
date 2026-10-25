@@ -25,7 +25,7 @@ from utils.metrics import (
     root_mean_squared_error,
     sharpe_like,
 )
-from utils.trading import profit_aware_loss, smooth_signal
+from utils.trading import PH_BUY_COST, PH_SELL_COST, position_change_cost, profit_aware_loss, smooth_signal
 
 
 @dataclass
@@ -35,7 +35,8 @@ class TrainingConfig:
     loss_type: str = "profit-aware"
     alpha: float = 1.0
     loss_lambda: float = 0.7
-    transaction_cost_rate: float = 0.001
+    buy_cost_rate: float = PH_BUY_COST
+    sell_cost_rate: float = PH_SELL_COST
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     batch_size: int = 64
@@ -58,7 +59,8 @@ def run_epoch(
     loader: DataLoader,
     optimizer: torch.optim.Optimizer | None,
     alpha: float,
-    transaction_cost_rate: float,
+    buy_cost_rate: float,
+    sell_cost_rate: float,
     device: torch.device,
     loss_type: str = "profit-aware",
     loss_lambda: float = 1.0,
@@ -70,7 +72,8 @@ def run_epoch(
         loader: Batched input/target pairs.
         optimizer: An optimizer when training, ``None`` during evaluation.
         alpha:  Scaling factor for the trading signal.
-        transaction_cost_rate:  Fractional cost per trade.
+        buy_cost_rate:  Fractional cost per unit of position increase (purchase).
+        sell_cost_rate: Fractional cost per unit of position decrease (sale).
         device: Target device for tensors.
         loss_type: ``"mse"`` for baseline, or ``"profit-aware"`` for the
             additive P&L loss.
@@ -104,7 +107,8 @@ def run_epoch(
                     pred,
                     y_batch,
                     alpha,
-                    transaction_cost_rate=transaction_cost_rate,
+                    buy_cost_rate=buy_cost_rate,
+                    sell_cost_rate=sell_cost_rate,
                     previous_signal=previous_signal,
                 )
                 loss = profit_loss + loss_lambda * F.mse_loss(pred, y_batch)
@@ -125,7 +129,7 @@ def run_epoch(
             else:
                 shifted_prev = torch.cat([prev_signal, signal[:-1]])
 
-            profit = signal * y_batch - transaction_cost_rate * torch.abs(signal - shifted_prev)
+            profit = signal * y_batch - position_change_cost(signal, shifted_prev, buy_cost_rate, sell_cost_rate)
 
             losses.append(float(loss.detach().cpu().item()))
             pred_all.append(pred.detach().cpu().numpy())
@@ -143,8 +147,8 @@ def run_epoch(
     return {
         "loss": float(np.mean(losses)),
         "directional_acc": directional_accuracy(pred_np, actual_np),
-        "cum_profit": cumulative_profit(signal_np, actual_np, transaction_cost_rate=transaction_cost_rate),
-        "cum_profit_geo": cumulative_profit_geometric(signal_np, actual_np, transaction_cost_rate=transaction_cost_rate),
+        "cum_profit": cumulative_profit(signal_np, actual_np, buy_cost_rate, sell_cost_rate),
+        "cum_profit_geo": cumulative_profit_geometric(signal_np, actual_np, buy_cost_rate, sell_cost_rate),
         "sharpe_like": sharpe_like(profit_np),
         "mse": mean_squared_error(pred_np, actual_np),
         "mae": mean_absolute_error(pred_np, actual_np),
@@ -207,7 +211,8 @@ def fit(
             train_loader,
             optimizer,
             config.alpha,
-            config.transaction_cost_rate,
+            config.buy_cost_rate,
+            config.sell_cost_rate,
             device,
             loss_type=config.loss_type,
             loss_lambda=config.loss_lambda,
@@ -217,7 +222,8 @@ def fit(
             val_loader,
             None,
             config.alpha,
-            config.transaction_cost_rate,
+            config.buy_cost_rate,
+            config.sell_cost_rate,
             device,
             loss_type=config.loss_type,
             loss_lambda=config.loss_lambda,

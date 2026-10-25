@@ -1,188 +1,188 @@
 # Enhanced GRU via Profit-Aware Loss Learning
 
-This project implements your thesis idea:
-
-- Predict next-step **returns** with a GRU
-- Convert prediction into a continuous trading signal: `signal_t = tanh(alpha * r_hat_t)`
-- Optimize a **profit-aware objective**:
-
-   cost_t = c * |signal_t - signal_{t-1}|
-
-   profit_t = signal_t * r_t - cost_t
-
-   Loss = -(1 / N) * sum(profit_t)
-
-See [docs/algorithm.md](docs/algorithm.md) for the full original thesis
-algorithm (Steps 0-11) this project implements.
-
-## Return Metrics
-
-The evaluation tracks two types of cumulative returns:
-
-- **Additive Return** (simple sum): `sum(signal * return - cost)`. Each trade uses the original capital. Simple but unrealistic — ignores compounding.
-- **Geometric Return** (compounding): `product(1 + signal * return - cost) - 1`. Each trade uses the current balance. Losses shrink future trade sizes; gains expand them. Reflects real-world trading.
-
-## Project Structure
+A GRU predicts each stock's next-day **return**. The prediction becomes a
+continuous trading position, and the model is trained on the simulated,
+cost-adjusted profit of that position instead of on prediction error alone.
+An MSE-trained GRU with the same architecture, features and data split is the
+baseline.
 
 ```
-├── main.py                 # All-in-one: train + evaluate (+ compare) in one run
-├── train.py                # Train only, save the model (test set untouched)
-├── evaluate.py             # Evaluate a saved model on the held-out test set
-├── predict.py              # Forecast the next N days using a saved model
-├── models/gru_model.py     # GRU(input=1, hidden=64, layers=2) -> LayerNorm -> Linear
-├── training/train.py       # Training loop with profit-aware loss
+signal_t = tanh(alpha * r_hat_t)                 position in (-1, 1)
+delta_t  = signal_t - signal_{t-1}
+cost_t   = c_buy * max(delta_t, 0) + c_sell * max(-delta_t, 0)
+profit_t = signal_t * r_t - cost_t
+Loss     = -mean(profit_t) + lambda * MSE(r_hat, r)  lambda = 0.7
+```
+
+`alpha = 1 / std(train returns)` is calibrated per stock. The MSE term keeps
+predictions on a realistic scale so that `tanh` does not saturate. The
+original algorithm (Steps 0-11) is in [docs/algorithm.md](docs/algorithm.md)
+and the methodology chapter is in
+[docs/methodology_chapter3.md](docs/methodology_chapter3.md).
+
+## Market and trading costs
+
+The study covers the **Philippine Stock Exchange only**:
+
+- **Universe:** the 30 PSEi constituents as of the 3 August 2026 rebalancing,
+  minus Maynilad (MYNLD). MYNLD listed in November 2025 and has about 190
+  usable samples, too few for a 70/15/15 split. That leaves 29 stocks, plus
+  the PSEi itself as a passive reference.
+- **Tiers:** each stock is grouped by its total price return from 2018 to
+  October 2026:
+  - **strong:** return of +25% or more (8 stocks)
+  - **mid:** between -25% and +25% (7 stocks)
+  - **weak:** return of -25% or less (14 stocks)
+
+  The universe and tiers are defined in `benchmark.py` (`PH_TIERED_SYMBOLS`).
+- **Data:** daily OHLCV from TradingView via `tvDatafeed`. Symbols are written
+  as `PSE:TICKER`, for example `PSE:ICT`. Data is cached in `data/` on first
+  download.
+
+Trading costs are asymmetric because the stock transaction tax applies only
+to sales:
+
+| Item | Buy | Sell |
+|---|---|---|
+| Broker commission (0.25%) | yes | yes |
+| VAT on commission (12%) | yes | yes |
+| PSE transaction fee + SCCP fee | yes | yes |
+| Stock transaction tax (0.1%) | no | yes |
+| **Total (used by the code)** | **0.296%** | **0.396%** |
+
+How the rates are charged:
+
+- A **position increase** (opening a long, or covering a short) is a purchase.
+  It is charged at the buy rate, `--buy-cost 0.00296`.
+- A **position decrease** (closing a long, or opening a short) is a sale. It
+  is charged at the sell rate, `--sell-cost 0.00396`.
+
+One function, `utils.trading.position_change_cost`, applies these costs
+everywhere: the training loss, every metric, the trade log, the classic
+strategy baselines and the web demo.
+
+## Setup (Windows)
+
+```
+python -m venv .venv
+source .venv/Scripts/activate
+pip install pip-tools
+pip-sync requirements-win.txt
+```
+
+The bare `python` on PATH is a different interpreter without the
+dependencies. Always use `.venv/Scripts/python.exe` or activate the venv
+first. Training uses CUDA when it is available.
+
+## Thesis run
+
+One command produces every result and figure:
+
+```
+.venv/Scripts/python.exe run_thesis.py
+```
+
+It runs four steps in order. All of them use the defaults: 50 epochs, lambda
+0.7, buy cost 0.296%, sell cost 0.396%, seed 42. With a GPU, expect roughly
+20-30 minutes in total. You can also run any step on its own.
+
+| # | Command | What it produces (in `results/`) |
+|---|---|---|
+| 1 | `benchmark.py --charts` | `benchmark_summary_ph_<time>.csv`: one row per symbol and loss. `benchmark_summary_ph_<time>_summary.txt`: aggregate, per-tier, win-rate and baseline tables. `benchmark_summary_ph_<time>_charts/`: the figures listed below. |
+| 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: paired t-test (profit-aware minus MSE), overall and per tier, on the latest benchmark CSV |
+| 3 | `scripts/cost_comparison.py` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost. Uses two symbols per tier. |
+| 4 | `main.py --compare --trade-log --symbol PSE:ICT` | Worked example. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
+
+Figures in `_charts/`:
+
+- `profit_comparison.png`
+- `profit_geo_comparison.png`
+- `buy_hold_comparison.png`
+- `sharpe_comparison.png`
+- `rmse_comparison.png`
+- `directional_acc_comparison.png`
+- `strategy_comparison.png`: MSE vs profit-aware vs buy & hold vs SMA, RSI and
+  MACD
+- `per_symbol_geo_diff.png`: profit-aware minus MSE geometric return, per stock
+
+To redraw figures or retest significance from an existing benchmark CSV,
+without retraining:
+
+```
+.venv/Scripts/python.exe scripts/plot_loss_comparison.py --csv results/benchmark_summary_ph_<time>.csv
+.venv/Scripts/python.exe scripts/significance.py --csv results/benchmark_summary_ph_<time>.csv
+```
+
+Both scripts default to the newest `results/benchmark_summary_ph_*.csv` when
+`--csv` is omitted.
+
+## Metrics
+
+| Metric | Meaning |
+|---|---|
+| Directional accuracy | Share of days where `sign(prediction) == sign(actual return)` |
+| Cumulative return (additive) | `sum(profit_t)`: each trade sized on the starting capital |
+| Geometric return | `prod(1 + profit_t) - 1`: each trade sized on the current balance (compounding) |
+| Sharpe-like ratio | `mean(profit_t) / std(profit_t) * sqrt(252)`, zero risk-free rate |
+| MSE / MAE / RMSE | Error of the predicted daily return |
+| Buy & hold | `prod(1 + r_t) - 1` over the test window, no costs (reference only) |
+| Degenerate run | The position never changes side over the whole test window. The model learned no day-to-day signal. |
+
+## Other entry points
+
+All entry points use the same data pipeline (`utils/pipeline.py`) and the same
+chronological 70/15/15 split, so the test window is always identical.
+
+```
+# Train + evaluate one stock (one loss, or both with --compare)
+.venv/Scripts/python.exe main.py --symbol PSE:BDO --compare --trade-log
+
+# Benchmark a subset, or with walk-forward validation
+.venv/Scripts/python.exe benchmark.py --symbols PSE:ICT,PSE:BDO --epochs 30
+.venv/Scripts/python.exe benchmark.py --walk-forward --folds 4 --charts
+
+# Train only (test set untouched), then evaluate, then forecast
+.venv/Scripts/python.exe scripts/train.py --symbol PSE:ICT --loss profit-aware
+.venv/Scripts/python.exe scripts/evaluate.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_<END>.pt --trade-log
+.venv/Scripts/python.exe scripts/predict.py --model results/profit_aware/PSE-ICT_profit_aware_2018-01-01_<END>.pt --days 5
+
+# Live demo: train both models on a chosen ticker and compare trade logs
+streamlit run webapp.py
+```
+
+Saved models and curves are named `<SYMBOL>_<loss>_<start>_<end>`. The `:`
+in the symbol becomes `-`, for example
+`results/profit_aware/PSE-ICT_profit_aware_2018-01-01_2026-10-23.pt`. Every
+argument and its default is listed in [docs/arguments.md](docs/arguments.md).
+
+## Project structure
+
+```
+├── run_thesis.py             # Runs every thesis step (see "Thesis run")
+├── main.py                   # Train + evaluate one stock (--compare for both losses)
+├── benchmark.py              # MSE vs profit-aware across the PSEi universe
+├── webapp.py                 # Streamlit live demo
+├── scripts/
+│   ├── train.py              # Train only, save the model
+│   ├── evaluate.py           # Evaluate a saved model on the test set
+│   ├── predict.py            # Forecast the next N days with a saved model
+│   ├── significance.py       # Paired t-test, profit-aware minus MSE
+│   ├── cost_comparison.py    # With-cost vs without-cost comparison
+│   └── plot_loss_comparison.py  # Benchmark figures, by tier
+├── models/gru_model.py       # 2-layer GRU -> LayerNorm -> Linear (tanh-bounded head)
+├── training/train.py         # Training loop, per-epoch metrics, early stopping
 ├── utils/
-│   ├── preprocessing.py    # Yahoo Finance download, returns calc, sliding windows
-│   ├── pipeline.py         # Shared data-prep pipeline used by main/train/evaluate
-│   ├── trading.py          # tanh-based trading signal, transaction costs, loss
-│   ├── metrics.py          # Directional accuracy, cumulative profit (additive + geometric), Sharpe ratio
-│   └── plotting.py         # Loss/profit curve plotting
-├── data/AAPL_prices.csv    # 2,105 days of AAPL data (2018-2026)
-├── results/                # Saved model + loss/profit curves
-└── requirements-*.txt      # pip-tools managed deps (Win + Linux)
+│   ├── preprocessing.py      # Download, returns, features, windows, splits
+│   ├── pipeline.py           # Shared data preparation for every entry point
+│   ├── trading.py            # tanh signal, PSE buy/sell cost model, profit-aware loss
+│   ├── metrics.py            # Accuracy, additive/geometric return, Sharpe, trade log
+│   ├── baselines.py          # SMA crossover, RSI and MACD strategy baselines
+│   ├── plotting.py           # Training loss/profit curves
+│   └── chart_style.py        # Shared figure style and colors
+├── data/                     # Cached daily OHLCV CSVs, one per symbol
+├── results/                  # Models, curves, benchmark tables and figures
+└── docs/                     # Algorithm, methodology chapter, arguments
 ```
 
-## Setup
-
-1. Create and activate a virtual environment (windows):
-
-   `python -m venv .venv`
-
-   `source .venv/Scripts/activate`
-
-2. Install the dependencies from the locked file:
-
-   `pip install pip-tools`
-
-   `pip-sync requirements-win.txt`
-
-3. If you change [requirements.in](requirements.in), regenerate the lock file:
-
-   `pip-compile requirements-win.in`
-
-This last step is usually done by the repository owner or maintainer.
-
-## Run
-
-Example:
-
-`python main.py --symbol AAPL --start 2018-01-01 --sequence-length 30 --alpha 5 --transaction-cost 0.001 --epochs 50`
-
-`python main.py --symbol GOOGL --start 2018-01-01 --capital 50000`
-
-### Compare MSE vs Profit-Aware
-
-`python main.py --compare --epochs 50`
-
-### With cost vs without cost
-
-`scripts/cost_comparison.py` trains three GRUs per symbol (MSE, profit-aware
-with no cost in the loss, profit-aware with the position-change cost
-`c * |signal_t - signal_{t-1}|` in the loss) and scores every one under both
-cost 0 and cost `c`, so all conditions share the same cost assumption.
-
-```
-.venv/Scripts/python.exe scripts/cost_comparison.py
-.venv/Scripts/python.exe scripts/cost_comparison.py --symbols AAPL,MSFT --epochs 30
-.venv/Scripts/python.exe scripts/cost_comparison.py --cost 0.002
-```
-
-Options: `--symbols` (comma-separated, default NVDA,AAPL,MSFT,KO,XOM,F),
-`--cost` (default 0.001), `--epochs`, `--loss-lambda`, `--seed`, `--out`
-(default `results/cost_comparison`). Budget about 3 minutes for the default
-6 symbols. Writes `results/cost_comparison.csv` (per-symbol data),
-`results/cost_comparison_summary.txt` (mean tables) and
-`results/cost_comparison.png` (return without cost, return with cost, and
-position-change charts).
-
-Artifacts are saved in [results](results). Models and curves are named with the
-stock symbol + date range, e.g. for `AAPL` trained `2018-01-01` to the latest
-date (`2026-08-17`):
-
-- trained model (`results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`)
-- loss curve (`AAPL_profit_aware_2018-01-01_2026-08-17_loss_curve.png`)
-- profit curve (`AAPL_profit_aware_2018-01-01_2026-08-17_profit_curve.png`)
-
-Graph titles show the symbol, the date range, and the train/val/test split.
-
-## After the main run: train, evaluate, and predict separately
-
-`main.py` does everything in one go. If you want to reuse a trained model —
-re-evaluate it on the test set, compare runs without retraining, or demo live
-predictions at the defense — use the three separate scripts. They all share the
-same data-prep pipeline (`utils/pipeline.py`), so the test window is always
-identical.
-
-### 1. Train (test set is left untouched)
-
-`python train.py --symbol AAPL --loss profit-aware --epochs 50`
-
-This trains on 70% of data, monitors on the 15% validation split, saves the
-model and its loss/profit curves to `results/profit_aware/`, and **never
-touches the test set**.
-
-```bash
-# Custom save path
-python train.py --symbol NVDA --hidden-size 128 --epochs 100 --save models/nvda_pa.pt
-
-# Train an MSE baseline instead
-python train.py --loss mse
-```
-
-### 2. Evaluate (reload a saved model, no retraining)
-
-`python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
-
-This rebuilds the identical chronological split, loads the saved weights, and
-prints the test-set metrics (directional accuracy, cumulative/geometric
-return, Sharpe-like ratio) for exactly the same window the model never saw.
-
-```bash
-# MSE model + full per-trade log + save a metrics summary
-python evaluate.py --model results/mse/AAPL_mse_2018-01-01_2026-08-17.pt --loss mse --trade-log --metrics-out results/mse/AAPL_mse_metrics.txt
-
-# Evaluate the AAPL model on a different ticker's test window
-python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt --symbol GOOGL --capital 50000
-```
-
-### 3. Predict (live forecast for a defense demo)
-
-`python predict.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
-
-Seeds the model with the last 30 returns, then forecasts the next 5 trading
-days (default), feeding each prediction back as input.
-
-```bash
-# 10 days on a different stock
-python predict.py --model models/nvda_pa.pt --symbol NVDA --days 10
-```
-
-### Typical workflow
-
-1. `python train.py --symbol AAPL --loss mse` and `python train.py --symbol AAPL --loss profit-aware`
-2. `python evaluate.py --model results/mse/AAPL_mse_2018-01-01_2026-08-17.pt --loss mse`
-3. `python evaluate.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt`
-4. Compare the two metric tables in your thesis write-up.
-5. `python predict.py --model results/profit_aware/AAPL_profit_aware_2018-01-01_2026-08-17.pt` for the live demo.
-6. `python main.py --loss mse --trade-log --symbol spy`
-7. `python main.py --loss profit-aware --trade-log --symbol spy`
-
-> `main.py --compare` still exists as a shortcut that trains both losses in one
-> run and prints a side-by-side comparison table.
-
-## Web UI (live demo)
-
-`streamlit run webapp.py`
-
-Pick a ticker from the thesis benchmark universe in the sidebar, click **Run**,
-and it trains fresh MSE and Profit-Aware GRUs on the same chronological split
-(same defaults as `main.py --compare`), then shows:
-
-- Side-by-side metric cards (directional accuracy, cumulative/geometric
-  return, Sharpe-like ratio, RMSE) plus a Buy & Hold reference
-- A bar-chart comparison and a running balance chart over the test window
-- The full per-trade log for each loss, as an interactive table
-
-Every ticker in `benchmark.py`'s `MARKETS` already has a cached CSV under
-`data/`, so the demo runs offline. Advanced settings (epochs, sequence
-length, capital, transaction cost, etc.) are in the sidebar's expander.
+To change dependencies, edit `requirements-win.in` and regenerate the lock
+file with `pip-compile requirements-win.in`.

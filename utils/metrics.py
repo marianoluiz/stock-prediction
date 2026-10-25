@@ -4,6 +4,8 @@ from typing import Sequence
 
 import numpy as np
 
+from utils.trading import PH_BUY_COST, PH_SELL_COST, position_change_cost
+
 
 def directional_accuracy(pred: np.ndarray, actual: np.ndarray) -> float:
     """Fraction of time-steps where predicted and actual share the same sign."""
@@ -15,11 +17,12 @@ def directional_accuracy(pred: np.ndarray, actual: np.ndarray) -> float:
 def cumulative_profit(
     signal: np.ndarray,
     actual_return: np.ndarray,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> float:
-    """Sum of P&L after deducting transaction costs on each position change."""
+    """Sum of P&L after deducting buy/sell costs on each position change."""
     previous_signal = np.concatenate(([0.0], signal[:-1]))
-    costs = transaction_cost_rate * np.abs(signal - previous_signal)
+    costs = position_change_cost(signal, previous_signal, buy_cost_rate, sell_cost_rate)
     net_profit = signal * actual_return - costs
     return float(net_profit.sum())
 
@@ -35,7 +38,8 @@ def sharpe_like(profit_series: np.ndarray, annualization: int = 252) -> float:
 def cumulative_profit_geometric(
     signal: np.ndarray,
     actual_return: np.ndarray,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> float:
     """Geometric (compounding) cumulative profit.
 
@@ -45,7 +49,7 @@ def cumulative_profit_geometric(
     balance = 1.0
     previous_signal = 0.0
     for s, r in zip(signal, actual_return):
-        cost = transaction_cost_rate * abs(s - previous_signal)
+        cost = position_change_cost(s, previous_signal, buy_cost_rate, sell_cost_rate)
         net_return = s * r - cost
         balance *= (1.0 + net_return)
         previous_signal = s
@@ -56,11 +60,12 @@ def running_balance(
     signal: np.ndarray,
     actual_return: np.ndarray,
     capital: float,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> np.ndarray:
     """Geometric running balance after every step, for balance-curve plotting."""
     previous_signal = np.concatenate(([0.0], signal[:-1]))
-    costs = transaction_cost_rate * np.abs(signal - previous_signal)
+    costs = position_change_cost(signal, previous_signal, buy_cost_rate, sell_cost_rate)
     net_returns = signal * actual_return - costs
     return capital * np.cumprod(1.0 + net_returns)
 
@@ -86,7 +91,8 @@ def trade_log_records(
     pred: np.ndarray,
     dates: Sequence,
     capital: float,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> tuple[list[dict], dict]:
     """Build the per-trade P&L rows and summary stats, without printing.
 
@@ -118,7 +124,7 @@ def trade_log_records(
         s = float(signal[i])
         r = float(actual_return[i])
         p = float(pred[i])
-        cost = transaction_cost_rate * abs(s - prev_sig)
+        cost = position_change_cost(s, prev_sig, buy_cost_rate, sell_cost_rate)
 
         net_return = s * r - cost
         trade_pnl = net_return * capital
@@ -175,10 +181,13 @@ def trade_log(
     pred: np.ndarray,
     dates: Sequence,
     capital: float,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> None:
     """Print a per-trade log showing P&L and running balance for every trade."""
-    records, summary = trade_log_records(signal, actual_return, pred, dates, capital, transaction_cost_rate)
+    records, summary = trade_log_records(
+        signal, actual_return, pred, dates, capital, buy_cost_rate, sell_cost_rate,
+    )
 
     header = (
         f"{'#':>4}  {'Date':>12}  {'Return':>8}  {'Pred':>8}  "

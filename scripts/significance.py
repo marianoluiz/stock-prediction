@@ -1,63 +1,75 @@
-"""Paired t-test (profit-aware minus MSE) per market and combined.
+"""Paired t-test (profit-aware minus MSE) over the PSEi benchmark, overall and by tier.
 
-Reads the benchmark CSVs written by benchmark.py (one row per symbol x loss),
-pairs profit-aware with mse per symbol, and runs a two-sided paired t-test.
-Writes a CSV table and a chart next to the inputs.
+Reads a benchmark CSV written by benchmark.py (one row per symbol x loss, or
+per symbol x loss x fold in walk-forward mode -- folds are averaged per symbol
+first), pairs profit-aware with MSE per symbol, and runs a two-sided paired
+t-test for each metric, over all symbols and within each performance tier.
+Writes a CSV table and a dot-and-whisker chart of the mean paired difference
+with its 95% confidence interval.
 
 Usage:
-    .venv/Scripts/python.exe significance.py                 # latest top-level us/ph CSVs
-    .venv/Scripts/python.exe significance.py --us X.csv --ph Y.csv --out results/significance
+    .venv/Scripts/python.exe scripts/significance.py                  # latest results/benchmark_summary_ph_*.csv
+    .venv/Scripts/python.exe scripts/significance.py --csv X.csv --out results/significance
 """
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import argparse
-import glob
-import os
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
 
+from scripts.plot_loss_comparison import TIER_LABELS, latest_csv
+from utils.chart_style import INK, INK_MUTED, SURFACE, apply_style, footnote, percent_axis, save, zero_line
+
 METRICS = {
     "cum_profit_geo": "Geometric return",
-    "sharpe_like": "Sharpe",
+    "sharpe_like": "Sharpe-like ratio",
     "directional_acc": "Directional accuracy",
 }
+PERCENT_METRICS = {"cum_profit_geo", "directional_acc"}
+GROUPS = ("all", "strong", "mid", "weak")  # the lone PSEi index row is too small to test alone
 
 
-def latest(market: str) -> str:
-    files = sorted(glob.glob(f"results/benchmark_summary_{market}_*.csv"))
-    if not files:
-        raise SystemExit(f"no results/benchmark_summary_{market}_*.csv found")
-    return files[-1]
-
-
-def paired_diffs(path: str, market: str) -> pd.DataFrame:
+def paired_diffs(path: Path) -> pd.DataFrame:
+    """Per-symbol (profit-aware minus MSE) for each metric, with the symbol's tier."""
     d = pd.read_csv(path)
-    d["symbol"] = market + ":" + d["symbol"].astype(str)
-    mse = d[d.loss_type == "mse"].set_index("symbol")
-    pa = d[d.loss_type == "profit-aware"].set_index("symbol")
-    return (pa[list(METRICS)] - mse[list(METRICS)]).dropna()
+    per_symbol = d.groupby(["symbol", "tier", "loss_type"], as_index=False)[list(METRICS)].mean()
+    mse = per_symbol[per_symbol.loss_type == "mse"].set_index("symbol")
+    pa = per_symbol[per_symbol.loss_type == "profit-aware"].set_index("symbol")
+    diff = (pa[list(METRICS)] - mse[list(METRICS)]).dropna()
+    diff["tier"] = mse.loc[diff.index, "tier"]
+    return diff
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--us", default=None)
-    ap.add_argument("--ph", default=None)
+    ap = argparse.ArgumentParser(description="Paired t-test, profit-aware minus MSE, over the PSEi benchmark")
+    ap.add_argument("--csv", default=None, help="benchmark_summary CSV (default: latest results/benchmark_summary_ph_*.csv)")
     ap.add_argument("--out", default="results/significance")
     args = ap.parse_args()
 
-    us = paired_diffs(args.us or latest("us"), "US")
-    ph = paired_diffs(args.ph or latest("ph"), "PH")
-    groups = {"US": us, "PH": ph, "Combined": pd.concat([us, ph])}
+    csv_path = Path(args.csv) if args.csv else latest_csv()
+    print(f"Input: {csv_path}\n")
+    diffs = paired_diffs(csv_path)
 
     rows = []
-    for g, diff in groups.items():
+    for g in GROUPS:
+        sub = diffs if g == "all" else diffs[diffs.tier == g]
+        if len(sub) < 2:
+            continue
         for col, label in METRICS.items():
-            x = diff[col]
+            x = sub[col]
             t = stats.ttest_1samp(x, 0)
             half = stats.t.ppf(0.975, len(x) - 1) * x.std(ddof=1) / np.sqrt(len(x))
             rows.append({
-                "group": g, "metric": label, "n": len(x),
+                "group": TIER_LABELS[g], "metric": label, "n": len(x),
                 "mean_diff": x.mean(), "ci95_lo": x.mean() - half, "ci95_hi": x.mean() + half,
                 "t": t.statistic, "p_two_sided": t.pvalue,
             })
@@ -66,32 +78,43 @@ def main() -> None:
     print("Paired t-test, profit-aware minus MSE (two-sided)\n")
     for label in METRICS.values():
         print(label)
-        sub = table[table.metric == label]
-        for r in sub.itertuples():
+        for r in table[table.metric == label].itertuples():
             star = " *" if r.p_two_sided < 0.05 else ""
-            print(f"  {r.group:9s} n={r.n:2d}  mean diff {r.mean_diff:+.4f}  "
+            print(f"  {r.group:7s} n={r.n:2d}  mean diff {r.mean_diff:+.4f}  "
                   f"95% CI [{r.ci95_lo:+.4f}, {r.ci95_hi:+.4f}]  p={r.p_two_sided:.3f}{star}")
         print()
     print("* = p < 0.05")
 
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    table.to_csv(args.out + ".csv", index=False)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out.with_suffix(".csv"), index=False)
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3.8))
-    for ax, label in zip(axes, METRICS.values()):
+    apply_style()
+    fig, axes = plt.subplots(1, len(METRICS), figsize=(11, 3.6), sharey=True)
+    for ax, (col, label) in zip(axes, METRICS.items()):
         sub = table[table.metric == label].reset_index(drop=True)
-        err = [sub.mean_diff - sub.ci95_lo, sub.ci95_hi - sub.mean_diff]
-        ax.bar(sub.group, sub.mean_diff, yerr=err, capsize=4,
-               color=["#4c78a8", "#f58518", "#54a24b"])
-        ax.axhline(0, color="black", lw=0.8)
-        for i, r in sub.iterrows():
-            ax.text(i, ax.get_ylim()[1], f"p={r.p_two_sided:.3f}", ha="center", va="bottom", fontsize=9)
-        ax.set_title(label, pad=18)
-        ax.set_ylabel("profit-aware - MSE")
-    fig.suptitle("Mean paired difference with 95% CI (two-sided paired t-test)", y=1.02)
-    fig.tight_layout()
-    fig.savefig(args.out + ".png", dpi=150, bbox_inches="tight")
-    print(f"\nwrote {args.out}.csv and {args.out}.png")
+        y = np.arange(len(sub))[::-1]
+        ax.hlines(y, sub.ci95_lo, sub.ci95_hi, color=INK, linewidth=2, zorder=3)
+        ax.scatter(sub.mean_diff, y, s=48, color=INK, edgecolor=SURFACE, linewidth=2, zorder=4)
+        for yi, r in zip(y, sub.itertuples()):
+            star = "*" if r.p_two_sided < 0.05 else ""
+            ax.annotate(f"p = {r.p_two_sided:.3f}{star}", (r.ci95_hi, yi), xytext=(5, 0),
+                        textcoords="offset points", va="center", fontsize=7.5, color=INK_MUTED)
+        zero_line(ax, axis="x")
+        ax.grid(axis="y", visible=False)
+        ax.grid(axis="x", visible=True)
+        if col in PERCENT_METRICS:
+            percent_axis(ax, axis="x")
+        ax.margins(x=0.3, y=0.15)
+        ax.set_title(label, loc="left", fontsize=10)
+        ax.set_yticks(y)
+        ax.set_yticklabels([f"{r.group} (n = {r.n})" for r in sub.itertuples()])
+    fig.suptitle("Profit-aware minus MSE: mean paired difference with 95% confidence interval",
+                 x=0.01, ha="left", fontsize=11, fontweight="semibold")
+    fig.tight_layout(rect=(0, 0.04, 1, 0.95))
+    footnote(fig, f"Two-sided paired t-test across symbols; * p < 0.05. Source: {csv_path.name}")
+    save(fig, out.with_suffix(".png"))
+    print(f"\nwrote {out.with_suffix('.csv')} and {out.with_suffix('.png')}")
 
 
 if __name__ == "__main__":

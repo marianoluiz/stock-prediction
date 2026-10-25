@@ -3,6 +3,13 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+# Philippine Stock Exchange round-trip friction, as a fraction of traded value.
+# Both legs pay broker commission (0.25%), 12% VAT on that commission, and the
+# PSE transaction + SCCP clearing fees (0.296% total); the sell leg also pays
+# the 0.1% stock transaction tax (0.396% total). Used exactly as given.
+PH_BUY_COST = 0.00296
+PH_SELL_COST = 0.00396
+
 
 def calibrate_alpha(train_returns: np.ndarray) -> float:
     """Pick ``alpha`` so a one-std-dev predicted return saturates ``tanh`` to ~0.76.
@@ -70,26 +77,51 @@ def shifted_previous_signal(
     return torch.cat([first_signal.unsqueeze(0), signal[:-1]])
 
 
+def position_change_cost(
+    signal,
+    previous_signal,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
+):
+    """Asymmetric cost of moving from ``previous_signal`` to ``signal``.
+
+    An increase in position (``delta > 0``: opening a long or covering a short)
+    is a purchase and pays ``buy_cost_rate`` per unit; a decrease (closing a long
+    or opening a short) is a sale and pays ``sell_cost_rate`` per unit:
+
+        cost = c_buy * max(delta, 0) + c_sell * max(-delta, 0)
+
+    Written with ``abs`` only, so the same expression works on floats, numpy
+    arrays and torch tensors (and stays differentiable for the loss). With
+    ``buy_cost_rate == sell_cost_rate == c`` it reduces to ``c * |delta|``.
+    """
+    delta = signal - previous_signal
+    magnitude = abs(delta)
+    return buy_cost_rate * 0.5 * (magnitude + delta) + sell_cost_rate * 0.5 * (magnitude - delta)
+
+
 def transaction_cost(
     signal: torch.Tensor,
     previous_signal: torch.Tensor | float | None = None,
-    cost_rate: float = 1.0,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> torch.Tensor:
-    """Differentiable transaction cost: c * |signal_t - signal_{t-1}|."""
+    """Differentiable per-step transaction cost on a batch of signals."""
 
     prev_signal = shifted_previous_signal(signal, previous_signal)
-    return cost_rate * torch.abs(signal - prev_signal)
+    return position_change_cost(signal, prev_signal, buy_cost_rate, sell_cost_rate)
 
 
 def profit_per_step(
     signal: torch.Tensor,
     actual_return: torch.Tensor,
     previous_signal: torch.Tensor | float | None = None,
-    cost_rate: float = 1.0,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
 ) -> torch.Tensor:
     """Net profit per step: signal_t * return_t - cost_t."""
 
-    cost = transaction_cost(signal, previous_signal, cost_rate)
+    cost = transaction_cost(signal, previous_signal, buy_cost_rate, sell_cost_rate)
     return signal * actual_return - cost
 
 
@@ -97,16 +129,18 @@ def profit_aware_loss(
     predicted_return: torch.Tensor,
     actual_return: torch.Tensor,
     alpha: float,
-    transaction_cost_rate: float = 0.001,
+    buy_cost_rate: float = PH_BUY_COST,
+    sell_cost_rate: float = PH_SELL_COST,
     previous_signal: torch.Tensor | float | None = None,
 ) -> torch.Tensor:
     """Loss = -mean(pos_t * return_t - cost_t) over a smooth tanh position.
 
     ``pos = tanh(alpha * r_hat)`` is a continuous position size in (-1, 1), so
     gradients flow for every prediction magnitude (no saturation). Transaction
-    costs apply to any position change, including fractional sizing changes.
+    costs apply to any position change, including fractional sizing changes,
+    at the buy rate for increases and the sell rate for decreases.
     """
 
     pos = smooth_signal(predicted_return, alpha)
-    profit = profit_per_step(pos, actual_return, previous_signal, transaction_cost_rate)
+    profit = profit_per_step(pos, actual_return, previous_signal, buy_cost_rate, sell_cost_rate)
     return -profit.mean()

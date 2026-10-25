@@ -11,9 +11,27 @@ drifts. This file is about pitfalls that aren't obvious from the code alone.
 - Python deps live in `.venv/` (Windows). The bare `python` / `python3` on
   PATH is a *different* interpreter without `torch` etc. installed. Always
   invoke `.venv/Scripts/python.exe main.py ...` (or activate the venv first).
+- On this machine (torch 2.12+cu126, RTX 3050) any process that runs a cuDNN
+  GRU — even forward only — crashes at interpreter exit with 0xC0000409
+  (bash shows exit 127). All output is already written; the run is valid.
+  `torch.backends.cudnn.enabled = False` avoids it but is ~3x slower and
+  changes results, so `run_thesis.py` tolerates that one exit code instead.
 - Training runs on CUDA if available (`torch.cuda.is_available()`), else CPU.
   A `--compare` run trains two full 50-epoch models sequentially — budget a
   few minutes per symbol.
+
+## Scope: PH market only, asymmetric costs
+
+- The study universe is the PSEi constituents (minus MYNLD, too little
+  history) plus `PSE:PSEI` as reference — `benchmark.py::PH_TIERED_SYMBOLS`.
+  US tickers were dropped; older `results/` and `docs/run-result*.md` may
+  still describe US runs.
+- Symbols are `PSE:TICKER` (routed to tvDatafeed). The `:` is illegal in
+  Windows file names — anything that builds a path from a symbol must
+  replace it (`PSE-ICT_...`), as `cache_path_for` and `main.py` do.
+- Costs are asymmetric: 0.296% per unit of position increase, 0.396% per unit
+  of decrease (`utils.trading.position_change_cost`). Never reintroduce a
+  local `rate * |delta|` — every simulator must call that one function.
 
 ## `docs/` freshness — read the code before trusting a doc
 

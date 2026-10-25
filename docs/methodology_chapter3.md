@@ -6,7 +6,9 @@ This study adopts a quantitative experimental research design to evaluate the ef
 
 Specifically, the study employs a comparative experimental framework, where model variants are trained and evaluated using identical datasets, feature-engineering procedures, and chronological data splits. The primary independent variable in this study is the training objective used by the model, while the dependent variables include both statistical prediction metrics and financial performance metrics.
 
-The study uses historical daily stock market data retrieved programmatically rather than manually. For stocks covered by Yahoo Finance, data is retrieved using the `yfinance` Python library. For Philippine Stock Exchange (PSE)-listed companies not available through Yahoo Finance, historical Open, High, Low, Close, and Volume (OHLCV) data is instead retrieved from TradingView through the `tvDatafeed` client, allowing the study to include local equities alongside internationally listed ones under the same experimental pipeline. Retrieved data is cached locally as CSV files so that repeated experiment runs use an identical, reproducible dataset per symbol and date range.
+The study focuses exclusively on the Philippine stock market. Its sample consists of the constituents of the Philippine Stock Exchange Composite Index (PSEi) following the index rebalancing effective 3 August 2026, together with the PSEi itself, which serves as a passive market reference. Of the 30 constituents, Maynilad Water Services, Inc. (MYNLD) is excluded because it was listed in November 2025 and therefore provides fewer than 200 usable observations, which is insufficient for a 70/15/15 chronological split. The final sample comprises 29 constituent stocks and the index. For descriptive grouping, the stocks are classified into three performance tiers according to their total price return from January 2018 (or their listing date, if later) to October 2026: strong (a return of at least +25%; 8 stocks), mid (between -25% and +25%; 7 stocks), and weak (a return of at most -25%; 14 stocks).
+
+Historical daily Open, High, Low, Close, and Volume (OHLCV) data from 1 January 2018 onward is retrieved programmatically from TradingView through the `tvDatafeed` client, since PSE-listed securities are not covered by Yahoo Finance. Retrieved data is cached locally as CSV files so that repeated experiment runs use an identical, reproducible dataset per symbol and date range.
 
 Rather than feeding raw OHLCV values directly into the GRU, the raw Close price series is first transformed into a daily percentage return series, from which a compact set of engineered input features is derived: the same-day return, lagged returns at 1-, 5-, and 10-day offsets, a 20-day rolling volume z-score, and a 10-day rolling return volatility. This feature frame is then converted into fixed-length sliding-window sequences (default lookback of 30 trading days) that serve as GRU input, with the next-step return as the prediction target. Missing values introduced by percentage-change and rolling-window computations are dropped before sequence generation, and all feature values retain their natural numeric scale (returns, z-scores, and rolling statistics) rather than requiring a separate min-max or standard-score normalization pass, since the return-based representation is already scale-stable across assets.
 
@@ -35,7 +37,7 @@ The study proposes an enhanced Gated Recurrent Unit (GRU) model that incorporate
 
 *Given:* $P_t$ historical stock price at time $t$, $X$ historical stock data, $L$ window length
 
-Collect historical daily OHLCV data (Yahoo Finance for internationally-listed equities, TradingView for PSE-listed equities). The Close price series is converted into a return series, engineered into a feature frame (return, lagged returns, rolling volume z-score, rolling volatility), and transformed into sliding-window sequences, where the previous $L$ observations are used as input for forecasting the next return.
+Collect historical daily OHLCV data for the PSE-listed securities in the study sample from TradingView. The Close price series is converted into a return series, engineered into a feature frame (return, lagged returns, rolling volume z-score, rolling volatility), and transformed into sliding-window sequences, where the previous $L$ observations are used as input for forecasting the next return.
 
 $$X_t = [X_{t-L}, X_{t-L+1}, \dots, X_{t-1}]$$
 
@@ -69,19 +71,19 @@ Convert the predicted return into a continuous trading signal using the hyperbol
 
 $$signal_t = \tanh(\alpha \hat{r}_t)$$
 
-A positive signal indicates a buy-oriented (long) position, a negative signal indicates a sell-oriented (short) position, and the magnitude of the signal represents position size / conviction, bounded within $(-1, 1)$. The scaling factor $\alpha$ is calibrated per asset as $\alpha = 1 / \mathrm{std}(return_{train})$, so that a one-standard-deviation predicted move maps to a signal of approximately $\pm 0.76$, keeping the signal sensitive to genuine directional moves regardless of an asset's volatility.
+A positive signal indicates a buy-oriented (long) position, a negative signal indicates a sell-oriented (short) position, and the magnitude of the signal represents position size / conviction, bounded within $(-1, 1)$. The scaling factor $\alpha$ is calibrated per asset as $\alpha = 1 / \mathrm{std}(return_{train})$, so that a one-standard-deviation predicted move maps to a signal of approximately $\pm 0.76$, keeping the signal sensitive to genuine directional moves regardless of an asset's volatility. Negative (short) positions are retained as a modeling abstraction so that both the baseline and the enhanced model are evaluated on the full directional signal; it is acknowledged that short selling is restricted for retail investors on the PSE, and this is treated as a limitation of the simulated trading framework.
 
 ### OBJECTIVE 2 – Direction-Sensitive Trading Signal
 
 **Step 5: Trading Friction Penalty Computation**
 
-*Given:* $signal_t$ current trading signal, $signal_{t-1}$ previous trading signal, $c$ transaction cost rate
+*Given:* $signal_t$ current trading signal, $signal_{t-1}$ previous trading signal, $c_{buy}$ buy-side cost rate ($0.296\%$), $c_{sell}$ sell-side cost rate ($0.396\%$)
 
 Compute the trading friction penalty based on the change in trading position:
 
-$$cost_t = c\,|signal_t - signal_{t-1}|$$
+$$cost_t = c_{buy}\,\max(\Delta_t, 0) + c_{sell}\,\max(-\Delta_t, 0), \qquad \Delta_t = signal_t - signal_{t-1}$$
 
-This penalty represents practical trading costs such as transaction fees, bid-ask spread, and slippage. The penalty increases when the model frequently changes its trading position, including fractional position-size changes.
+An increase in position ($\Delta_t > 0$) corresponds to a purchase and incurs the buy-side rate, while a decrease ($\Delta_t < 0$) corresponds to a sale and incurs the higher sell-side rate, which includes the stock transaction tax. This penalty represents the practical cost of trading on the PSE. The penalty increases when the model frequently changes its trading position, including fractional position-size changes.
 
 ### OBJECTIVE 3 – Trading Friction
 
@@ -147,7 +149,7 @@ System Architecture Input-Process-Output Diagram
 
 The system architecture follows an input-process-output structure for the enhanced GRU forecasting model.
 
-**Input.** Historical daily OHLCV data for the selected stock — retrieved via `yfinance` for internationally-listed equities, or via TradingView's `tvDatafeed` client for PSE-listed equities not covered by Yahoo Finance — cached locally as CSV for reproducibility.
+**Input.** Historical daily OHLCV data for the selected PSE-listed security, retrieved via TradingView's `tvDatafeed` client and cached locally as CSV for reproducibility.
 
 **Process.** The process consists of: (1) data loading and cleaning; (2) return computation and feature engineering (lagged returns, rolling volume z-score, rolling volatility); (3) sliding-window sequence generation; (4) chronological train/validation/test splitting (70/15/15), or expanding-window walk-forward fold generation; (5) GRU forecasting (2-layer GRU, 64 hidden units, LayerNorm + linear head, optional $\tanh$-bounded output); (6) direction-sensitive trading signal generation; (7) trading friction penalty computation; (8) cost-adjusted simulated trading profit computation; (9) profit-aware loss calculation (with MSE calibration term); (10) backpropagation and parameter update via AdamW; and (11) evaluation on the held-out validation/test set.
 
@@ -166,7 +168,7 @@ Hardware Requirement
 | Memory (RAM) | 8 GB | 16 GB or higher | Stores datasets, training batches, model variables, and intermediate outputs during training. |
 | Storage | 10 GB available disk space | SSD with at least 20 GB available disk space | Stores historical stock datasets, notebooks, trained model files, saved weights, and experiment results. |
 | Graphics Processing Unit (GPU) | Integrated GPU or CPU-based training | NVIDIA GTX 1650, RTX 3050, or higher (CUDA-enabled) | Accelerates deep learning model training and testing when available. |
-| Internet Connection | Required | Stable broadband connection | Used for retrieving historical stock market data from Yahoo Finance and TradingView. |
+| Internet Connection | Required | Stable broadband connection | Used for retrieving historical stock market data from TradingView. |
 
 Table 3.1 presents the minimum and recommended hardware requirements for conducting the study. These specifications are needed to support stock data preprocessing, time-series sequence generation, GRU model training, experiment execution, and storage of datasets and model outputs. Since the study involves moderate deep learning workloads, a higher processor, larger memory capacity, and GPU support are recommended to improve training efficiency.
 
@@ -180,13 +182,12 @@ Software Requirements
 | Pandas | 3.0.3 | Used for loading, cleaning, and preprocessing stock market data. |
 | NumPy | 2.4.6 | Supports numerical computation, array operations, and evaluation-metric implementations. |
 | Matplotlib | 3.10.9 | Used for loss-curve and profit-curve visualization. |
-| yfinance | 1.3.0 | Used for retrieving historical stock data for Yahoo Finance-covered equities. |
 | tvDatafeed (tvdatafeed-enhanced) | latest | Used for retrieving historical OHLCV data for PSE-listed equities via TradingView. |
 | Jupyter Notebook / Google Colab | Latest version | Used for experiment development and testing. |
 | Visual Studio Code | Latest version | Used as the main code editor. |
 | Git / GitHub | Latest version | Used for version control and project collaboration. |
 
-Table 3.2 presents the software requirements and libraries needed for the development, training, testing, and evaluation of the enhanced GRU model. Python serves as the main programming language, while PyTorch, Pandas, NumPy, and Matplotlib handle model implementation, data handling, preprocessing, and visualization; `yfinance` and `tvDatafeed` together provide historical data coverage across both internationally-listed and PSE-listed equities.
+Table 3.2 presents the software requirements and libraries needed for the development, training, testing, and evaluation of the enhanced GRU model. Python serves as the main programming language, while PyTorch, Pandas, NumPy, and Matplotlib handle model implementation, data handling, preprocessing, and visualization; `tvDatafeed` provides the historical data for the PSE-listed securities in the study sample.
 
 ## 3.4 Theories, Methods, and Tools
 
@@ -208,7 +209,7 @@ In this study, the predicted return is transformed into a continuous trading sig
 
 Trading friction refers to real-world costs and constraints that reduce actual trading profit. These include transaction fees, broker charges, bid-ask spread, market friction, and slippage. Slippage occurs when the expected price of a trade differs from the actual execution price. In practical trading environments, frequent buying and selling may reduce profitability because each change in position can introduce additional cost.
 
-In this study, trading friction is represented through a differentiable transaction cost penalty proportional to the change in the (continuous) trading signal between consecutive time steps. This discourages unstable switching between buy and sell positions and makes the simulated trading outcome closer to practical trading conditions. This concept directly supports the study's third problem, which states that the baseline GRU does not incorporate trading friction and realistic profit maximization in its objective function.
+In this study, trading friction is represented through a differentiable transaction cost penalty proportional to the change in the (continuous) trading signal between consecutive time steps, with separate rates for purchases and sales to reflect the asymmetric cost structure of the PSE. This discourages unstable switching between buy and sell positions and makes the simulated trading outcome closer to practical trading conditions. This concept directly supports the study's third problem, which states that the baseline GRU does not incorporate trading friction and realistic profit maximization in its objective function.
 
 **4. Cost-Adjusted Simulated Trading Profit**
 
@@ -225,7 +226,7 @@ Methods and their Formulas
 |---|---|
 | Market Return | $return_t = \dfrac{P_{t+1} - P_t}{P_t}$ |
 | Direction-Sensitive Trading Signal | $signal_t = \tanh(\alpha \hat{r}_t)$, with $\alpha = 1/\mathrm{std}(return_{train})$ |
-| Trading Friction Penalty | $cost_t = c\,\lvert signal_t - signal_{t-1}\rvert$ |
+| Trading Friction Penalty | $cost_t = c_{buy}\max(\Delta_t, 0) + c_{sell}\max(-\Delta_t, 0)$, where $\Delta_t = signal_t - signal_{t-1}$ |
 | Cost-Adjusted Trading Profit | $profit_t = signal_t \times return_t - cost_t$ |
 | Profit-Aware Loss Learning | $Loss = -\dfrac{1}{N}\displaystyle\sum_{t=1}^{N} profit_t + \lambda \cdot \dfrac{1}{N}\displaystyle\sum_{t=1}^{N} (\hat{r}_t - return_t)^2$, $\ \lambda = 0.7$ |
 
@@ -271,13 +272,26 @@ The trading signal is then multiplied by the actual market return during simulat
 
 *Solution 3:* A trading friction penalty is integrated into the simulated profit computation to represent practical trading costs. Trading friction refers to real-world costs and limitations that reduce trading profitability, such as transaction fees, broker charges, bid-ask spread, and slippage. Slippage occurs when the expected trade price differs from the actual execution price. These factors can significantly affect profitability, especially when a model frequently switches between buy and sell positions.
 
-In the Philippine stock trading context, trading friction may include broker commission, value-added tax (VAT), PSE transaction fee, Securities Clearing Corporation of the Philippines (SCCP) fee, and sales tax for selling transactions. For example, COL Financial lists standard stock trading charges such as a 0.25% commission based on gross trade amount, 12% VAT on commission, 0.005% PSE transaction fee, 0.01% SCCP fee, and 0.1% sales tax for selling transactions (COL Financial, 2025). These fees show that trading profit may be reduced every time a position is opened, closed, or changed. Therefore, this study represents these practical costs through a simplified transaction cost rate $c$ (default $0.001$, i.e., 0.1% per unit of signal change) in the trading friction penalty.
+In the Philippine stock trading context, trading friction may include broker commission, value-added tax (VAT), PSE transaction fee, Securities Clearing Corporation of the Philippines (SCCP) fee, and sales tax for selling transactions. For example, COL Financial lists standard stock trading charges such as a 0.25% commission based on gross trade amount, 12% VAT on commission, 0.005% PSE transaction fee, 0.01% SCCP fee, and 0.1% sales tax for selling transactions (COL Financial, 2025). These fees show that trading profit may be reduced every time a position is opened, closed, or changed. Because the 0.1% stock transaction tax applies only to sales, the total cost differs between the two sides of a trade, as summarized in Table 3.4.
+
+**Table 3.4**
+Philippine Stock Trading Costs per Transaction
+
+| Cost Item | Buy | Sell |
+|---|---|---|
+| Broker commission (0.25% of gross trade value) | Yes | Yes |
+| VAT on commission (12%) | Yes | Yes |
+| PSE transaction fee (0.005%) and SCCP fee (0.01%) | Yes | Yes |
+| Stock transaction tax (0.1%) | No | Yes |
+| Total | 0.296% | 0.396% |
+
+Therefore, this study represents these practical costs through two rates in the trading friction penalty: a buy-side rate $c_{buy} = 0.296\%$ and a sell-side rate $c_{sell} = 0.396\%$ per unit of position change, as given by the totals in Table 3.4.
 
 To address this limitation, the enhanced GRU applies a transaction cost penalty whenever the trading signal changes between consecutive time steps. The penalty is computed as:
 
-$$cost_t = c\,\lvert signal_t - signal_{t-1}\rvert$$
+$$cost_t = c_{buy}\,\max(\Delta_t, 0) + c_{sell}\,\max(-\Delta_t, 0), \qquad \Delta_t = signal_t - signal_{t-1}$$
 
-where $c$ represents the transaction cost rate, $signal_t$ represents the current trading signal, and $signal_{t-1}$ represents the previous trading signal. The cost-adjusted trading profit is then computed as:
+where $c_{buy}$ and $c_{sell}$ represent the buy-side and sell-side cost rates, $signal_t$ represents the current trading signal, and $signal_{t-1}$ represents the previous trading signal. An increase in position (opening a long position or covering a short position) is charged at $c_{buy}$, and a decrease (closing a long position or opening a short position) is charged at $c_{sell}$. The same cost function is applied to the baseline model, the enhanced model, and the classic trading-strategy benchmarks at evaluation time, so that all approaches are compared under identical trading costs. The cost-adjusted trading profit is then computed as:
 
 $$profit_t = signal_t \times return_t - cost_t$$
 
@@ -287,7 +301,7 @@ This allows the proposed model to account for trading friction during both train
 
 ### 3.4.3 Tools
 
-**Table 3.4**
+**Table 3.5**
 Tools and their Uses in Research
 
 | Tool | Uses |
@@ -295,7 +309,6 @@ Tools and their Uses in Research
 | Visual Studio Code | Used for writing and managing the source code. |
 | Jupyter Notebook | Used for testing formulas, preprocessing, and model experiments. |
 | Google Colab | Used as an optional environment for GPU-assisted training. |
-| Yahoo Finance / yfinance | Used to retrieve historical stock market data for internationally-listed equities. |
-| TradingView / tvDatafeed | Used to retrieve historical OHLCV data for PSE-listed equities not covered by Yahoo Finance. |
+| TradingView / tvDatafeed | Used to retrieve historical OHLCV data for the PSE-listed securities in the study sample. |
 | GitHub | Used for version control and project collaboration. |
 | Matplotlib | Used to generate visualizations such as loss curves and trading (profit) performance graphs. |
