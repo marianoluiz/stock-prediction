@@ -12,6 +12,9 @@ of the working paper (26 October 2026), preserving its figures and main
 tables. Compare any edits made later in the live Google Doc before replacing
 that document with this copy.
 For a section-by-section record, see `docs/with-sop-2-changes.md`.
+For the exact paper images, current PSEi chart sources, and a Colab run-all
+gallery, see `figures/README.md` and
+`notebooks/PSEi_Thesis_Figures_Colab.ipynb`.
 
 ## Data and environment used here
 

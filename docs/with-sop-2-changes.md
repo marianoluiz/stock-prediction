@@ -52,3 +52,15 @@ assert that embedded images are byte-identical to standalone PNGs in `main`.
 The `lambda = 0.7` primary benchmark and the separate CPU sensitivity run
 must be read as different runs. The five weights were examined on held-out
 windows for description, not selected as a validated optimum.
+
+## Figure package added after the paper revision
+
+The `figures/paper/` gallery exports the eleven numbered images embedded in
+this DOCX; `scripts/build_paper_figures.py` checks those images against the
+DOCX and rebuilds a separate `figures/generated/` set from the archived
+Chapter 1 illustration code and committed PSEi result CSVs. The Colab entry
+point is `notebooks/PSEi_Thesis_Figures_Colab.ipynb`. This packaging does not
+change the paper pages or model results. The group's original Chapter 1
+notebook is archived with outputs and account metadata removed. Figure 1.2's
+paper caption needs review: its original Colab produces positive aggregate
+simulated profit, despite the caption's negative-profit wording.

@@ -75,6 +75,13 @@ first. Training uses CUDA when it is available.
 
 ## Thesis run
 
+The separate [`with-sop-2` paper](docs/with-sop-2.docx) has a numbered
+[11-figure gallery](figures/README.md). Open the
+[PSEi figure notebook](notebooks/PSEi_Thesis_Figures_Colab.ipynb) in Google
+Colab and run all cells to display the exact paper figures and rebuild their
+available source plots from the committed results. This gallery does not
+retrain the models; the full experiment command below does.
+
 One command produces every result and figure:
 
 ```
