@@ -1,0 +1,61 @@
+Total benchmark time: 196.8s
+Trading costs: buy 0.296%, sell 0.396%; loss lambda 1.0
+
+=====================================================================================
+  PSEi INDEX (PSE:PSEI)
+=====================================================================================
+  Model                     DirAcc      CumRet      GeoRet    Sharpe      RMSE
+  ---------------------------------------------------------------------------------
+  mse                       0.4961     -0.0034     -0.0035    -0.291   0.01092
+  profit-aware              0.5070     +0.0064     +0.0058    +0.269   0.01129
+  buy & hold                           -0.0440
+  sma_crossover             0.5244     -0.0162     -0.0210    -0.071
+  rsi                       0.0397     -0.0079     -0.0091    -0.233
+  macd                      0.4927     -0.0796     -0.0792    -0.701
+
+=====================================================================================
+  PSEi INDEX PER FOLD (geometric return on each out-of-time test window)
+=====================================================================================
+  Fold  Test window               Days      B&H      MSE       PA      SMA      RSI     MACD   PA pos
+  ---------------------------------------------------------------------------------
+  0     2024-03-25 - 2024-11-13    157  -0.0244  -0.0001  +0.0023  +0.0351  -0.0303  +0.0424   -0.252
+  1     2024-11-14 - 2025-07-10    157  -0.0374  +0.0007  +0.0060  -0.1336  +0.0067  -0.2396   -0.312
+  2     2025-07-11 - 2026-03-02    157  -0.0056  -0.0014  -0.0017  +0.0987  -0.0118  -0.0851   -0.242
+  3     2026-03-03 - 2026-10-23    160  -0.1086  -0.0133  +0.0167  -0.0841  -0.0008  -0.0345   -0.172
+  PA pos = profit-aware mean position (-1 = always fully short, +1 = always fully long)
+
+  profit-aware beats MSE on (out of 4 index folds):
+    Geometric return: 3/4
+    Sharpe-like:      4/4
+    Directional acc:  1/4
+
+=====================================================================================
+  PROFIT-AWARE vs CLASSIC STRATEGY BASELINES (out of 4 index folds)
+=====================================================================================
+  profit-aware beats sma_crossover   geo_ret: 2/4   sharpe: 2/4
+  profit-aware beats rsi             geo_ret: 3/4   sharpe: 4/4
+  profit-aware beats macd            geo_ret: 3/4   sharpe: 3/4
+  profit-aware beats buy & hold      geo_ret: 4/4
+
+=====================================================================================
+  POSITION BEHAVIOUR (mean over index folds; position in [-1, +1])
+  mean pos near +-|pos| = the model holds one side of the market (a drift bet)
+=====================================================================================
+  Model                     Mean pos  Mean |pos|  Turnover/day  Short days
+  ---------------------------------------------------------------------------------
+  mse                         -0.004      +0.108        0.0035       50.0%
+  profit-aware                -0.244      +0.244        0.0023      100.0%
+
+=====================================================================================
+  FOLD STABILITY (std-dev of geometric return across a symbol's folds)
+  Lower = more consistent across time regimes, not just a lucky window
+=====================================================================================
+  Symbol                mse   profit-aware
+  ----------------------------------------
+  PSE:PSEI           0.0066         0.0079
+
+=====================================================================================
+  DEGENERATE RUNS (executed signal never changes side across the test window)
+=====================================================================================
+  mse            4/4  ['PSE:PSEI f0', 'PSE:PSEI f1', 'PSE:PSEI f2', 'PSE:PSEI f3']
+  profit-aware   4/4  ['PSE:PSEI f0', 'PSE:PSEI f1', 'PSE:PSEI f2', 'PSE:PSEI f3']

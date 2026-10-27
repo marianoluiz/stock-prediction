@@ -199,10 +199,11 @@ def daily_rows(m: dict, buy_cost: float, sell_cost: float) -> list[dict]:
         prev = np.concatenate(([0.0], pos[:-1]))
         cost = position_change_cost(pos, prev, buy_cost, sell_cost) if costed else 0.0
         net = pos * actual - cost
-        for d, a, p, n in zip(m["dates_np"], actual, pos, net):
+        for i, (d, a, p, n) in enumerate(zip(m["dates_np"], actual, pos, net)):
             out.append({
                 "symbol": m["symbol"], "fold": m["fold"], "date": str(d)[:10], "model": model,
                 "actual_return": float(a), "position": float(p), "net_return": float(n),
+                "predicted_return": float(m["pred_np"][i]) if model == m["loss_type"] else None,
             })
     return out
 
@@ -494,6 +495,8 @@ def main() -> None:
     parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum change in --early-stop-metric to count as an improvement")
     parser.add_argument("--early-stop-metric", type=str, default="val_loss", choices=["val_loss", "val_profit", "val_profit_geo", "val_dir_acc"], help="Validation metric to monitor for early stopping / best-checkpoint selection. Avoid val_profit/val_profit_geo as the default: on a ~300-day val window they're dominated by a handful of large-return days, so a checkpoint that happens to collapse to a constant-direction bet matching the val window's drift can look 'best' by luck and get locked in (verified empirically -- see results/benchmark_full_v3 vs v4).")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto",
+                        help="Execution device; use cpu to reproduce the SOP 2 sweep")
     parser.add_argument("--output", type=str, default=None, help="Output CSV path (default: results/benchmark_summary_<timestamp>.csv)")
     parser.add_argument("--walk-forward", action="store_true", help="Use expanding-window walk-forward validation (--folds contiguous out-of-time test chunks) instead of a single train/val/test split")
     parser.add_argument("--folds", type=int, default=4, help="Number of walk-forward folds (only used with --walk-forward)")
@@ -529,7 +532,10 @@ def main() -> None:
         if args.output is None:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             args.output = f"results/benchmark_summary_{market_tag}_{stamp}.csv"
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        selected_device = ("cuda" if torch.cuda.is_available() else "cpu") if args.device == "auto" else args.device
+        if selected_device == "cuda" and not torch.cuda.is_available():
+            parser.error("--device cuda requested but CUDA is unavailable")
+        device = torch.device(selected_device)
         print(f"Using device: {device}")
         if args.walk_forward:
             print(f"Walk-forward mode: {args.folds} expanding-window folds, eval_fraction={args.eval_fraction}")
