@@ -22,11 +22,12 @@ manifest with source and SHA-256 information.
 **Interpretation boundary:** Figures 1.2–1.4 are illustrations, not evidence
 from the held-out PSEi test folds. The original Figure 1.2 simulation uses
 actual prices to construct noisy predicted prices, so it must not be called an
-out-of-sample forecast. The current paper calls Figure 1.2 an example of
-"negative trading profit," but that Colab reports **positive aggregate gross
-profit of about 115 units** on its synthetic path; the plot itself displays
-prices, not a profit series. Its caption and explanation need to be narrowed
-before final submission. Figure 1.4's cost is a fixed example, not the
+out-of-sample forecast. The corrected paper caption identifies Figure 1.2 as
+synthetic actual and noisy predicted prices. The Colab reports **positive
+aggregate gross profit of about 115 units** on its synthetic path; the plot
+itself displays prices, not a profit series. Its inherited in-image title
+mentions "poor trading profit," but the chart alone cannot establish that
+claim. Figure 1.4's cost is a fixed example, not the
 0.296%/0.396% asymmetric position-change cost used by the current model.
 Figures 4.1–4.5 show the saved PSEi experiment results. Replotting those CSVs
 does not retrain the models. Differences in font, resolution, or cropping

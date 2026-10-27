@@ -60,7 +60,17 @@ this DOCX; `scripts/build_paper_figures.py` checks those images against the
 DOCX and rebuilds a separate `figures/generated/` set from the archived
 Chapter 1 illustration code and committed PSEi result CSVs. The Colab entry
 point is `notebooks/PSEi_Thesis_Figures_Colab.ipynb`. This packaging does not
-change the paper pages or model results. The group's original Chapter 1
-notebook is archived with outputs and account metadata removed. Figure 1.2's
-paper caption needs review: its original Colab produces positive aggregate
-simulated profit, despite the caption's negative-profit wording.
+change model results. The group's original Chapter 1 notebook is archived
+with outputs and account metadata removed.
+
+## Chapter 1 source correction
+
+Figure 1.2's caption and explanation now identify the image as synthetic
+actual and noisy predicted prices. The original Colab constructs its
+predicted prices from realized prices plus noise and reports positive
+aggregate simulated profit; the paper no longer claims this visual proves
+negative aggregate profit or out-of-sample forecasting. Figure 1.4's caption
+and explanation now identify its fixed 0.5-unit-per-observation deduction as
+an illustration, separate from the PSEi model's asymmetric position-change
+cost. The List of Figures titles were updated. All figure images and model
+results remain unchanged; the revised prose is highlighted yellow.

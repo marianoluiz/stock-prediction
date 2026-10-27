@@ -1,6 +1,6 @@
 {
   "paper": "docs/with-sop-2.docx",
-  "paper_sha256": "23c0a70828fa7243b80fdc71fc62b108943a4916c760e0f942adfa4ec80158f1",
+  "paper_sha256": "6eb2c785537452e0d8dc16c4533d6f41dbf3ec5f84883d6f85c4a71c521f37dd",
   "note": "Chapter 1 is illustrative; Chapter 3 diagrams are paper assets; Chapter 4 replots committed PSEi CSVs without retraining.",
   "inputs": {
     "results/benchmark_summary_psei_20261025_203842.csv": "1f5904d9febf36dd0c1aff1dc9d40e0d5eb6cd2e1b5101de5d51db30f9affc31",
