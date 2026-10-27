@@ -5,10 +5,13 @@ The SOP 2 comparison extends the PSEi-only repository state at
 `predicted_return` in its daily CSV, and `sop2_compare.py` calculates forecast
 magnitude and position behavior. The separate thesis copy is
 `docs/with-sop-2.docx`; its newly revised wording is highlighted in yellow.
+The sensitivity chart is embedded as Figure 4.3 alongside the paper's
+original Chapter Four visuals; the standalone PNG remains in `results/`.
 The thesis copy was built from the latest locally available full DOCX export
 of the working paper (26 October 2026), preserving its figures and main
 tables. Compare any edits made later in the live Google Doc before replacing
 that document with this copy.
+For a section-by-section record, see `docs/with-sop-2-changes.md`.
 
 ## Data and environment used here
 
