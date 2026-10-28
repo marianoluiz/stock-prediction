@@ -1,0 +1,35 @@
+# Light, low-chrome theme for webapp.py. Series colors match utils/chart_style.py
+# (blue = MSE baseline, orange = profit-aware, gray = references).
+
+[theme]
+base = "light"
+primaryColor = "#1d4e89"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f6f8"
+textColor = "#16191d"
+borderColor = "#dfe2e7"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "6px"
+buttonRadius = "6px"
+
+font = "'Inter':https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 14
+headingFontWeights = [700, 600, 600, 600, 500, 500]
+linkUnderline = false
+
+greenColor = "#1a7f37"
+redColor = "#c4362b"
+blueColor = "#2a78d6"
+orangeColor = "#eb6834"
+grayColor = "#6b6f76"
+
+chartCategoricalColors = ["#2a78d6", "#eb6834", "#898781", "#8a5fbf", "#4fa07a", "#c94f6d"]
+
+dataframeBorderColor = "#e6e8ec"
+dataframeHeaderBackgroundColor = "#f5f6f8"
+
+[theme.sidebar]
+backgroundColor = "#f8f9fb"
+secondaryBackgroundColor = "#ffffff"

@@ -4,7 +4,7 @@ inspect the resulting trade log side by side.
 Reuses the exact same data pipeline, model, and training loop as
 ``main.py --compare --trade-log`` (same defaults as benchmark.py), so the
 numbers shown here match what the CLI would produce for identical
-arguments. Data is loaded from the CSV caches under data/ -- once
+arguments. Data is loaded from the CSV caches under data/. Once
 benchmark.py has run, every ticker in the thesis universe (the PSEi
 constituents and the index, see benchmark.py's ALL_SYMBOLS) has one, so no network
 access is needed for a live defense demo.
@@ -12,6 +12,8 @@ access is needed for a live defense demo.
 Run with:
 
     streamlit run webapp.py
+
+The theme lives in .streamlit/config.toml.
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import time
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -37,16 +38,16 @@ from utils.metrics import running_balance, sharpe_like, trade_log_records
 from utils.pipeline import cache_path_for, prepare_data
 from utils.preprocessing import load_stock_data
 from utils.plotting import format_date
-from utils.chart_style import COLOR_MSE, COLOR_PA, COLOR_REF, INK, apply_style
+from utils.chart_style import COLOR_MSE, COLOR_PA, COLOR_REF
 from utils.trading import PH_BUY_COST, PH_SELL_COST, calibrate_alpha
 
-STRATEGY_LABELS = {"sma_crossover": "SMA Crossover", "rsi": "RSI", "macd": "MACD"}
+STRATEGY_LABELS = {"sma_crossover": "SMA crossover", "rsi": "RSI", "macd": "MACD"}
+STRATEGY_COLORS = ["#8a5fbf", "#4fa07a", "#c94f6d"]
 
-# Shared thesis palette (utils.chart_style): blue = MSE, orange = Profit-Aware,
-# gray = Buy & Hold. The three TA baselines are secondary context on the
-# balance chart only.
+# Shared thesis palette (utils.chart_style): blue = MSE, orange = profit-aware,
+# gray = buy & hold. The three TA baselines are secondary context.
 
-st.set_page_config(page_title="GRU: MSE vs Profit-Aware", page_icon="📈", layout="wide")
+st.set_page_config(page_title="GRU: MSE vs profit-aware", page_icon=":material/query_stats:", layout="wide")
 
 
 def ticker_catalog() -> list[dict]:
@@ -139,108 +140,89 @@ def run_comparison(symbol: str, cfg: dict) -> dict:
     }
 
 
-def metric_card(col, title: str, m: dict, capital: float) -> None:
-    with col:
-        st.markdown(f"**{title}**")
-        st.metric("Directional Accuracy", f"{m['directional_acc']*100:.1f}%")
-        st.metric("Cumulative Return", f"{m['cum_profit']*100:+.2f}%", f"{m['cum_profit']*capital:+,.0f} PHP")
-        st.metric("Geometric Return", f"{m['cum_profit_geo']*100:+.2f}%", f"{m['cum_profit_geo']*capital:+,.0f} PHP")
-        st.metric("Sharpe-like Ratio", f"{m['sharpe_like']:.3f}")
-        st.metric("RMSE", f"{m['rmse']:.5f}")
-        if m.get("degenerate"):
-            st.caption("⚠️ never changes side over the test window")
+def side_switches(signal: np.ndarray) -> int:
+    """How many times the executed position changes side (long <-> short)."""
+    sides = np.sign(signal)
+    sides = sides[sides != 0]
+    return int(np.sum(sides[1:] != sides[:-1]))
 
 
-def strategy_card(col, title: str, m: dict, capital: float) -> None:
-    with col:
-        st.markdown(f"**{title}**")
-        st.metric("Directional Accuracy", f"{m['directional_acc']*100:.1f}%")
-        st.metric("Cumulative Return", f"{m['cum_profit']*100:+.2f}%", f"{m['cum_profit']*capital:+,.0f} PHP")
-        st.metric("Geometric Return", f"{m['cum_profit_geo']*100:+.2f}%", f"{m['cum_profit_geo']*capital:+,.0f} PHP")
-        st.metric("Sharpe-like Ratio", f"{m['sharpe_like']:.3f}")
+def metrics_table(result: dict) -> pd.DataFrame:
+    """One row per policy on the shared test window."""
+    rows = []
+    for name, m in (("MSE baseline", result["mse"]), ("Profit-aware", result["pa"])):
+        rows.append({
+            "Policy": name, "Directional accuracy": m["directional_acc"], "Cumulative return": m["cum_profit"],
+            "Geometric return": m["cum_profit_geo"], "Sharpe-like": m["sharpe_like"], "RMSE": m["rmse"],
+            "Side switches": side_switches(m["signal_np"]),
+        })
+    rows.append({"Policy": "Buy & hold", "Geometric return": result["buy_hold_return"],
+                 "Sharpe-like": result["buy_hold_sharpe"]})
+    for name, m in result["strategies"].items():
+        rows.append({
+            "Policy": STRATEGY_LABELS[name], "Directional accuracy": m["directional_acc"],
+            "Cumulative return": m["cum_profit"], "Geometric return": m["cum_profit_geo"],
+            "Sharpe-like": m["sharpe_like"],
+        })
+    return pd.DataFrame(rows).set_index("Policy")
 
 
-def comparison_figure(mse: dict, pa: dict):
-    specs = [
-        ("directional_acc", "Directional Accuracy", "{:.1%}"),
-        ("cum_profit", "Cumulative Return", "{:.1%}"),
-        ("cum_profit_geo", "Geometric Return", "{:.1%}"),
-        ("sharpe_like", "Sharpe-like Ratio", "{:.2f}"),
-    ]
-    apply_style()
-    fig, axes = plt.subplots(1, 4, figsize=(15, 3.2))
-    for ax, (key, label, fmt) in zip(axes, specs):
-        vals = [mse[key], pa[key]]
-        bars = ax.bar(["MSE", "Profit-Aware"], vals, width=0.55, color=[COLOR_MSE, COLOR_PA])
-        ax.axhline(0, color=COLOR_REF, linewidth=0.9)
-        ax.set_title(label, fontsize=10)
-        for b, v in zip(bars, vals):
-            ax.annotate(
-                fmt.format(v), (b.get_x() + b.get_width() / 2, v),
-                ha="center", va="bottom" if v >= 0 else "top", fontsize=8, color=INK,
-            )
-    fig.tight_layout()
-    return fig
+def render_trade_log(m: dict) -> None:
+    summary = m["summary"]
+    with st.container(horizontal=True):
+        st.metric("Wins / losses", f"{summary['wins']} / {summary['losses']}", border=True)
+        st.metric("Best day", f"{summary['best_trade']*100:+.2f}%", summary["best_date"] or None,
+                  delta_color="off", delta_arrow="off", border=True)
+        st.metric("Worst day", f"{summary['worst_trade']*100:+.2f}%", summary["worst_date"] or None,
+                  delta_color="off", delta_arrow="off", border=True)
+        st.metric("Final balance", f"{summary['final_geo_balance']:,.0f} PHP", border=True)
 
+    df = pd.DataFrame(m["records"])
+    df["side"] = np.where(df["signal"] > 0, "Long", np.where(df["signal"] < 0, "Short", "Flat"))
+    df["return"] *= 100
+    df.index = range(1, len(df) + 1)
+    df = df[["date", "return", "pred", "signal", "side", "trade_pnl", "add_balance", "geo_balance"]]
+    st.dataframe(
+        df,
+        height=420,
+        column_config={
+            "date": st.column_config.TextColumn("Date"),
+            "return": st.column_config.NumberColumn("Actual return", format="%.2f%%"),
+            "pred": st.column_config.NumberColumn("Predicted return", format="%.4f"),
+            "signal": st.column_config.NumberColumn("Position", format="%.3f"),
+            "side": st.column_config.TextColumn("Side"),
+            "trade_pnl": st.column_config.NumberColumn("Day P&L (PHP)", format="localized"),
+            "add_balance": st.column_config.NumberColumn("Additive balance (PHP)", format="localized"),
+            "geo_balance": st.column_config.NumberColumn("Compounded balance (PHP)", format="localized"),
+        },
+    )
 
-def render_trade_log(container, m: dict) -> None:
-    with container:
-        summary = m["summary"]
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Wins / Losses", f"{summary['wins']} / {summary['losses']}")
-        c2.metric("Best trade", f"{summary['best_trade']*100:+.2f}%", summary["best_date"] or "-")
-        c3.metric("Worst trade", f"{summary['worst_trade']*100:+.2f}%", summary["worst_date"] or "-")
-        c4.metric("Final geometric balance", f"{summary['final_geo_balance']:,.0f} PHP")
-
-        df = pd.DataFrame(m["records"])
-        df["side"] = np.where(df["signal"] > 0, "LONG", np.where(df["signal"] < 0, "SHORT", "FLAT"))
-        df["return"] *= 100
-        df.index = range(1, len(df) + 1)
-        df = df[["date", "return", "pred", "signal", "side", "trade_pnl", "add_balance", "geo_balance"]]
-        st.dataframe(
-            df,
-            use_container_width=True,
-            height=420,
-            column_config={
-                "date": st.column_config.TextColumn("Date"),
-                "return": st.column_config.NumberColumn("Return", format="%.2f%%"),
-                "pred": st.column_config.NumberColumn("Predicted Return", format="%.4f"),
-                "signal": st.column_config.NumberColumn("Signal", format="%.3f"),
-                "side": st.column_config.TextColumn("Side"),
-                "trade_pnl": st.column_config.NumberColumn("Trade P&L (PHP)", format="%.0f"),
-                "add_balance": st.column_config.NumberColumn("Additive Balance (PHP)", format="%.0f"),
-                "geo_balance": st.column_config.NumberColumn("Geometric Balance (PHP)", format="%.0f"),
-            },
-        )
-
-
-st.title("GRU Stock Predictor — MSE vs Profit-Aware")
-st.caption(
-    "Pick a ticker from the thesis benchmark universe, train both loss variants live "
-    "on the identical chronological split, and compare their test-window trade logs."
-)
 
 catalog = ticker_catalog()
-labels = [f"{c['symbol'].split(':')[-1]}  ·  {c['kind']}" for c in catalog]
+labels = [f"{c['symbol'].split(':')[-1]}  ({c['kind']})" for c in catalog]
 
 with st.sidebar:
     st.header("Setup")
     idx = st.selectbox("Ticker", options=range(len(catalog)), format_func=lambda i: labels[i])
     symbol = catalog[idx]["symbol"]
 
-    with st.expander("Advanced settings"):
+    with st.expander("Advanced settings", icon=":material/tune:"):
         sequence_length = st.number_input("Sequence length", 5, 120, 30)
         epochs = st.slider("Epochs", 5, 100, 50, step=5)
         hidden_size = st.number_input("Hidden size", 8, 256, 64, step=8)
         num_layers = st.number_input("GRU layers", 1, 4, 2)
         dropout = st.slider("Dropout", 0.0, 0.6, 0.2, step=0.05)
         capital = st.number_input("Capital (PHP)", 1_000.0, 10_000_000.0, 100_000.0, step=10_000.0)
-        buy_cost = st.number_input("Buy cost rate (commission, VAT, PSE/SCCP fees)", 0.0, 0.05, PH_BUY_COST, step=0.0001, format="%.5f")
-        sell_cost = st.number_input("Sell cost rate (buy-side fees + 0.1% stock transaction tax)", 0.0, 0.05, PH_SELL_COST, step=0.0001, format="%.5f")
-        loss_lambda = st.number_input("Profit-aware MSE weight (lambda)", 0.0, 5.0, 0.7, step=0.1)
+        buy_cost = st.number_input("Buy cost rate", 0.0, 0.05, PH_BUY_COST, step=0.0001, format="%.5f",
+                                   help="Commission, VAT and PSE/SCCP fees per unit of position increase")
+        sell_cost = st.number_input("Sell cost rate", 0.0, 0.05, PH_SELL_COST, step=0.0001, format="%.5f",
+                                    help="Buy-side fees plus the 0.1% stock transaction tax, per unit of position decrease")
+        loss_lambda = st.number_input("MSE calibration weight (lambda)", 0.0, 5.0, 0.7, step=0.1)
         seed = st.number_input("Random seed", 0, 10_000, 42)
 
-    run_clicked = st.button("Run", type="primary", use_container_width=True)
+    run_clicked = st.button("Train both models", type="primary", icon=":material/play_arrow:", width="stretch")
+    st.caption("Single chronological 70/15/15 split for a live demo. The thesis results use "
+               "4-fold walk-forward evaluation; see `results/`.")
 
 cfg = dict(
     start="2018-01-01",
@@ -260,72 +242,92 @@ cfg = dict(
     alpha=None,
 )
 
+st.title("GRU return forecasting: MSE vs profit-aware loss")
+st.caption("Both models share the data, architecture, seed and chronological split. "
+           "Only the training loss differs.")
+
 if run_clicked:
-    with st.spinner(f"Training MSE and Profit-Aware GRUs on {symbol} ({epochs} epochs each)..."):
+    with st.spinner(f"Training both GRUs on {symbol} ({epochs} epochs each)..."):
         t0 = time.time()
         st.session_state["result"] = run_comparison(symbol, cfg)
         st.session_state["elapsed"] = time.time() - t0
+        st.session_state["cfg"] = cfg
 
 result = st.session_state.get("result")
 if result is None:
-    st.info("Choose a ticker in the sidebar and click **Run**.")
+    st.info("Choose a ticker in the sidebar, then select **Train both models**.", icon=":material/info:")
     st.stop()
 
-symbol = result["symbol"]
+run_cfg = st.session_state.get("cfg", cfg)
 split = result["split"]
 mse, pa = result["mse"], result["pa"]
 capital = result["capital"]
 
-st.subheader(symbol)
-
-info_cols = st.columns(4)
-info_cols[0].metric("Test Window Start", format_date(split.dates_test[0]))
-info_cols[1].metric("Test Window End", format_date(split.dates_test[-1]))
-info_cols[2].metric("Trading Days", f"{len(split.dates_test)}")
-info_cols[3].metric("Alpha", f"{result['alpha']:.4f}")
-
-st.caption(
-    f"Trained in {st.session_state.get('elapsed', 0):.1f}s on {_device()} · "
-    f"costs: buy {cfg['buy_cost']:.3%}, sell {cfg['sell_cost']:.3%} per unit of position change"
+st.subheader(result["symbol"])
+st.markdown(
+    f":gray-badge[:material/date_range: {format_date(split.dates_test[0])} to {format_date(split.dates_test[-1])}] "
+    f":gray-badge[{len(split.dates_test)} test days] "
+    f":gray-badge[alpha {result['alpha']:.2f}] "
+    f":gray-badge[lambda {run_cfg['loss_lambda']:g}] "
+    f":gray-badge[costs {run_cfg['buy_cost']:.3%} buy, {run_cfg['sell_cost']:.3%} sell] "
+    f":gray-badge[:material/timer: {st.session_state.get('elapsed', 0):.0f}s on {_device()}]"
 )
 
-col_mse, col_pa, col_bh = st.columns(3)
-metric_card(col_mse, "MSE Baseline", mse, capital)
-metric_card(col_pa, "Profit-Aware", pa, capital)
-with col_bh:
-    st.markdown("**Buy & Hold (reference)**")
-    st.caption("Always long, no trading costs — context, not a scored baseline.")
-    st.metric(
-        "Cumulative Return",
-        f"{result['buy_hold_return']*100:+.2f}%",
-        f"{result['buy_hold_return']*capital:+,.0f} PHP",
+with st.container(horizontal=True):
+    st.metric("Profit-aware return", f"{pa['cum_profit_geo']:+.2%}",
+              f"{(pa['cum_profit_geo'] - mse['cum_profit_geo']) * 100:+.2f} pp vs MSE", border=True)
+    st.metric("MSE baseline return", f"{mse['cum_profit_geo']:+.2%}",
+              f"{mse['cum_profit_geo'] * capital:+,.0f} PHP", border=True)
+    st.metric("Buy & hold return", f"{result['buy_hold_return']:+.2%}", "always long, no costs",
+              delta_color="off", delta_arrow="off", border=True)
+    st.metric("Profit-aware directional accuracy", f"{pa['directional_acc']:.1%}",
+              f"{(pa['directional_acc'] - mse['directional_acc']) * 100:+.1f} pp vs MSE", border=True)
+st.caption("Returns are compounded over the test window, after trading costs.")
+
+one_sided = [name for name, m in (("the MSE baseline", mse), ("the profit-aware model", pa)) if m.get("degenerate")]
+if one_sided:
+    subject = " and ".join(one_sided)
+    verb = "never changes" if len(one_sided) == 1 else "never change"
+    st.warning(
+        f"{subject[0].upper()}{subject[1:]} {verb} side over the test window, so the return reflects the "
+        "market's drift in that direction rather than day-to-day forecasting.", icon=":material/warning:",
     )
-    st.metric("Sharpe-like Ratio", f"{result['buy_hold_sharpe']:.3f}")
 
-st.markdown("### Classic strategy baselines")
-st.caption("Trend-following, mean-reversion, and momentum strategies on the same test window and costs.")
-strategy_cols = st.columns(3)
-for col, name in zip(strategy_cols, ["sma_crossover", "rsi", "macd"]):
-    strategy_card(col, STRATEGY_LABELS[name], result["strategies"][name], capital)
+tab_balance, tab_metrics, tab_log = st.tabs([
+    ":material/show_chart: Balance", ":material/table_chart: All metrics", ":material/receipt_long: Trade log",
+])
 
-st.markdown("### MSE vs Profit-Aware at a glance")
-st.pyplot(comparison_figure(mse, pa))
+with tab_balance:
+    dates = [format_date(d) for d in split.dates_test]
+    chart_df = pd.DataFrame(
+        {
+            "MSE baseline": [r["geo_balance"] for r in mse["records"]],
+            "Profit-aware": [r["geo_balance"] for r in pa["records"]],
+            "Buy & hold": result["buy_hold_balance"],
+            **{STRATEGY_LABELS[name]: bal for name, bal in result["strategy_balances"].items()},
+        },
+        index=pd.Index(dates, name="Date"),
+    )
+    st.line_chart(chart_df, color=[COLOR_MSE, COLOR_PA, COLOR_REF, *STRATEGY_COLORS], y_label="Balance (PHP)")
+    st.caption(f"Growth of {capital:,.0f} PHP, compounded daily after costs. "
+               "Buy & hold is shown without costs, as context.")
 
-st.markdown("### Balance over the test window (geometric compounding)")
-dates = [format_date(d) for d in split.dates_test]
-chart_df = pd.DataFrame(
-    {
-        "MSE": [r["geo_balance"] for r in mse["records"]],
-        "Profit-Aware": [r["geo_balance"] for r in pa["records"]],
-        "Buy & Hold": result["buy_hold_balance"],
-        **{STRATEGY_LABELS[name]: bal for name, bal in result["strategy_balances"].items()},
-    },
-    index=pd.Index(dates, name="Date"),
-)
-strategy_colors = ["#8a5fbf", "#4fa07a", "#c94f6d"]
-st.line_chart(chart_df, color=[COLOR_MSE, COLOR_PA, COLOR_REF, *strategy_colors])
+with tab_metrics:
+    st.dataframe(
+        metrics_table(result),
+        column_config={
+            "Directional accuracy": st.column_config.NumberColumn(format="percent"),
+            "Cumulative return": st.column_config.NumberColumn(format="percent"),
+            "Geometric return": st.column_config.NumberColumn(format="percent"),
+            "Sharpe-like": st.column_config.NumberColumn(format="%.2f"),
+            "RMSE": st.column_config.NumberColumn(format="%.5f"),
+            "Side switches": st.column_config.NumberColumn(format="%d"),
+        },
+    )
+    st.caption("Cumulative return adds the daily net returns; geometric return compounds them. "
+               "SMA crossover, RSI and MACD trade the same window under the same costs.")
 
-st.markdown("### Trade log")
-tab_mse, tab_pa = st.tabs(["MSE Baseline", "Profit-Aware"])
-render_trade_log(tab_mse, mse)
-render_trade_log(tab_pa, pa)
+with tab_log:
+    which = st.segmented_control("Model", ["Profit-aware", "MSE baseline"], default="Profit-aware",
+                                 label_visibility="collapsed")
+    render_trade_log(mse if which == "MSE baseline" else pa)
