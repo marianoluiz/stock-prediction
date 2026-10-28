@@ -15,7 +15,9 @@ Loss     = -mean(profit_t) + lambda * MSE(r_hat, r)  lambda = 0.7
 ```
 
 `alpha = 1 / std(train returns)` is calibrated per training window. The MSE
-term keeps predictions on a realistic scale so that `tanh` does not saturate.
+term penalizes return-prediction error. The saved lambda sweep shows changes
+in forecast scale and exposure; it does not establish that calibration prevents
+constant-side positions or improves simulated returns.
 The original algorithm (Steps 0-11) is in [docs/algorithm.md](docs/algorithm.md).
 **The full description of the current system, the evaluation design and the
 latest results is in [docs/system-and-results.md](docs/system-and-results.md)**,
@@ -79,7 +81,9 @@ The separate [`with-sop-2` paper](docs/with-sop-2.docx) has a numbered
 [11-figure gallery](figures/README.md). Open the
 [PSEi figure notebook](notebooks/PSEi_Thesis_Figures_Colab.ipynb) in Google
 Colab and run all cells to display the exact paper figures and rebuild their
-available source plots from the committed results. This gallery does not
+available source plots from the committed results. The paper is the 28 October
+2026 export of the live PSEi revision. See the [figure and algorithm alignment
+audit](docs/figure-alignment-2026-10-28.md) and [restored detailed algorithm](docs/algorithm-with-sop-2.md). This gallery does not
 retrain the models; the full experiment command below does.
 
 One command produces every result and figure:

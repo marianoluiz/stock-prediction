@@ -1,7 +1,7 @@
 """Rebuild the figure gallery for docs/with-sop-2.docx without training models.
 
-The Chapter 1 simulations reproduce the calculations in the group's original
-Colab notebook. Chapter 3 diagrams are preserved paper assets. Chapter 4
+Figures 1.2 and 1.3 use observed PSEi data and hypothetical forecasts.
+Figures 1.1 and 1.4 retain the original illustrative calculations. Chapter 3 diagrams are preserved paper assets. Chapter 4
 charts are recalculated from the committed PSEi result CSVs with the same
 plotting functions that produced the repository's original charts.
 """
@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT))
 from scripts.cost_comparison import plot as plot_cost_comparison  # noqa: E402
 from scripts.plot_loss_comparison import plot_comparisons  # noqa: E402
 from scripts.significance import index_tests, plot as plot_significance  # noqa: E402
+from scripts.build_chapter1_loss_figures import build as build_loss_figures
 from sop2_compare import main as compare_lambdas  # noqa: E402
 
 BENCHMARK = Path("results/benchmark_summary_psei_20261025_203842.csv")
@@ -61,8 +62,8 @@ INPUT_HASHES = {
 }
 CHAPTER_1 = {
     "figure_1_1.png": "MSE equation; generated version is typeset on white for visibility",
-    "figure_1_2.png": "Original Colab's 200-day simulated price and prediction series",
-    "figure_1_3.png": "Original Colab's symmetric squared-error example",
+    "figure_1_2.png": "One observed pre-test PSEi return: MSE versus profit-aware loss over hypothetical forecasts",
+    "figure_1_3.png": "Same observed return: illustrative loss sensitivity at lambda 0, 0.3, 0.7, 1, 2",
     "figure_1_4.png": "Original Colab's fixed 0.5-unit-per-row cost illustration",
 }
 CHAPTER_3 = ("figure_3_1.png", "figure_3_2.png")
@@ -73,19 +74,7 @@ CHAPTER_4 = {
     "figure_4_4.png": "significance.png",
     "figure_4_5.png": "cost_comparison.png",
 }
-PAPER_MEDIA = {
-    "figure_1_1.png": "word/media/image24.png",
-    "figure_1_2.png": "word/media/image28.png",
-    "figure_1_3.png": "word/media/image13.png",
-    "figure_1_4.png": "word/media/image11.png",
-    "figure_3_1.png": "word/media/image47.png",
-    "figure_3_2.png": "word/media/image21.png",
-    "figure_4_1.png": "word/media/image63.png",
-    "figure_4_2.png": "word/media/image29.png",
-    "figure_4_3.png": "word/media/image17.png",
-    "figure_4_4.png": "word/media/image15.png",
-    "figure_4_5.png": "word/media/image37.png",
-}
+
 
 
 def sha256(path: Path) -> str:
@@ -104,10 +93,13 @@ def verify_inputs() -> None:
 
 def verify_paper_images(paper: Path) -> None:
     with ZipFile(ROOT / "docs/with-sop-2.docx") as document:
-        for name, media_path in PAPER_MEDIA.items():
-            if hashlib.sha256(document.read(media_path)).hexdigest() != sha256(paper / name):
-                raise ValueError(f"Paper image changed or was mapped incorrectly: {name}")
-    print(f"Verified {len(PAPER_MEDIA)} exact images against the paper DOCX")
+        hashes = {hashlib.sha256(document.read(name)).hexdigest()
+                  for name in document.namelist() if name.startswith("word/media/")}
+        expected = [*CHAPTER_1, *CHAPTER_3, *CHAPTER_4]
+        for name in expected:
+            if sha256(paper / name) not in hashes:
+                raise ValueError(f"Current paper image missing from the DOCX: {name}")
+    print(f"Verified {len(expected)} exact images against the current paper DOCX")
 
 
 def save(fig: plt.Figure, path: Path) -> None:
@@ -116,7 +108,7 @@ def save(fig: plt.Figure, path: Path) -> None:
 
 
 def build_chapter_1(output: Path) -> dict[str, float]:
-    """Keep the original Colab arithmetic; no PSEi observations are used."""
+    """Retain the legacy simulations for audit; replace 1.2/1.3 below."""
     # The original DOCX image is transparent black text. Typeset a white
     # rendition here so the formula stays visible in dark GitHub themes.
     fig, ax = plt.subplots(figsize=(8, 2.2))
@@ -138,7 +130,7 @@ def build_chapter_1(output: Path) -> dict[str, float]:
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(frame.actual, label="Actual Price")
     ax.plot(frame.predicted, label="Predicted Price")
-    ax.set_title("Low MSE but Poor Trading Profit")
+    ax.set_title("Synthetic actual and noisy predicted prices (legacy)")
     ax.legend()
     save(fig, output / "figure_1_2.png")
 
@@ -211,18 +203,28 @@ def main() -> None:
     verify_paper_images(paper)
     output.mkdir(parents=True, exist_ok=True)
     illustrative = build_chapter_1(output)
+    illustrative["psei_loss_illustration"] = build_loss_figures(
+        output, ROOT / "data/PSE-PSEI_2018-01-01_latest.csv")
+    for name, source in {
+        "figure_1_2.png": "Figure_1_2_SOP1_data_based_loss_comparison.png",
+        "figure_1_3.png": "Figure_1_3_SOP2_data_based_lambda_curves.png",
+    }.items():
+        shutil.copyfile(output / source, output / name)
     for name in CHAPTER_3:
         shutil.copyfile(paper / name, output / name)
     build_chapter_4(output)
     manifest = {
         "paper": "docs/with-sop-2.docx",
         "paper_sha256": sha256(ROOT / "docs/with-sop-2.docx"),
-        "note": "Chapter 1 is illustrative; Chapter 3 diagrams are paper assets; Chapter 4 replots committed PSEi CSVs without retraining.",
+        "note": "Gallery matches the 2026-10-28 Google Docs export. Historical synthetic figures 1.2 and 1.3 are retained separately in figures/legacy-paper. See docs/figure-alignment-2026-10-28.md. Chapter 1 is illustrative; Chapter 3 diagrams are saved assets; Chapter 4 replots committed CSVs without retraining.",
+        "illustration_input_sha256": "35bb13112fc537d62697042bb7dd27803816f51254cadad2822ed0e5913d4972",
         "inputs": {str(k).replace("\\", "/"): v for k, v in INPUT_HASHES.items()},
         "illustrative_values": illustrative,
         "figures": [
             {"number": name[7:10].replace("_", "."), "paper": f"figures/paper/{name}",
              "paper_sha256": sha256(paper / name),
+             "current": f"figures/paper/{name}",
+             "current_sha256": sha256(paper / name),
              "generated": f"figures/generated/{name}",
              "generated_sha256": sha256(output / name),
              "source_detail": CHAPTER_1.get(name, CHAPTER_4.get(name, "Exact paper diagram")),
