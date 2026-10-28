@@ -83,9 +83,15 @@ Rebuild the saved PSEi figures and numerical tables **without training**:
 .venv/Scripts/python.exe run_thesis.py --figures-only
 ```
 
-For Google Colab, open [scripts/PSEi_Thesis_Figures_Colab.ipynb](scripts/PSEi_Thesis_Figures_Colab.ipynb)
-and run all cells. It clones this branch, rebuilds the saved plots, and displays
-the figures and tables. It uses the committed CSVs; it does not train models.
+The training, SOP 2 experiment, and Chapter 4 analyses run locally with these
+Python scripts, using the same workflow as `main`. No notebook is required.
+The optional [Chapter 1 Colab notebook](scripts/Chapter_1_Figures_Colab.ipynb)
+only generates Figures 1.1–1.4. It does not run the SOP 2 experiment or any
+Chapter 4–5 analysis. The same four illustrations can be generated locally:
+
+```
+.venv/Scripts/python.exe scripts/build_chapter1_loss_figures.py
+```
 
 One command produces every result and figure:
 
@@ -165,7 +171,7 @@ and all 1,601 forecast-grid values are reproducible in
 The source data checksum is checked before plotting. Figure 1.4 retains the
 group's synthetic seed-42, fixed 0.5-unit cost example; it is not a backtest
 of the current asymmetric cost model. Chapter 3 diagrams are retained static
-assets, displayed by the notebook rather than regenerated from experiment data.
+assets in `docs/`, rather than diagrams regenerated from experiment data.
 
 | Numerical table | Source/output |
 |---|---|
@@ -175,7 +181,9 @@ assets, displayed by the notebook rather than regenerated from experiment data.
 | Paired tests and confidence intervals | `results/significance.csv` |
 | With/without-cost experiment | `results/cost_comparison.csv` and `results/cost_comparison_summary.txt` |
 
-To rerun only SOP 2, use `scripts/sop2_compare.py --train`. To recompute its
+Run SOP 2 locally with `.venv/Scripts/python.exe scripts/sop2_compare.py --train`.
+This experiment and its Chapter 4–5 analysis are separate from the optional
+Chapter 1 notebook. To recompute its
 tables and chart from saved daily/fold CSVs, omit `--train`. This validates
 matching test dates and the fixed MSE comparator, and recomputes RMSE and
 returns from daily observations. The original sweep used Python 3.12.14,
@@ -245,8 +253,8 @@ argument and its default is listed in [docs/arguments.md](docs/arguments.md).
 │   ├── plot_loss_comparison.py  # Benchmark comparison figures
 │   ├── sop2_compare.py       # Matched calibration sweep and its tables/chart
 │   ├── build_chapter1_loss_figures.py  # Observed-return loss illustrations
-│   ├── build_paper_figures.py # Rebuild all saved-result plots and tables
-│   └── PSEi_Thesis_Figures_Colab.ipynb  # Run-all Colab figures and tables
+│   ├── build_paper_figures.py # Rebuild all saved-result plots and tables locally
+│   └── Chapter_1_Figures_Colab.ipynb  # Optional Chapter 1 illustrations only
 ├── models/gru_model.py       # 2-layer GRU -> LayerNorm -> Linear (tanh-bounded head)
 ├── training/train.py         # Training loop, per-epoch metrics, early stopping
 ├── utils/

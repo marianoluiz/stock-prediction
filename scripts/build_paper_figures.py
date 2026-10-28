@@ -16,49 +16,17 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.build_chapter1_loss_figures import build as build_loss_figures
+from scripts.build_chapter1_loss_figures import build_all as build_chapter_1
 from scripts.cost_comparison import plot as plot_cost_comparison
 from scripts.significance import index_tests, plot as plot_significance
 from scripts.sop2_compare import main as compare_lambdas
 
 SAVED_BENCHMARK = ROOT / "results/benchmark_summary_psei_20261025_203842.csv"
-
-
-def save(fig: plt.Figure, path: Path) -> None:
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-
-def build_chapter_1(output: Path) -> None:
-    output.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 2.2))
-    ax.axis("off")
-    ax.text(0.5, 0.5, r"$\mathrm{MSE}=\frac{1}{N}\sum_{t=1}^{N}(r_t-\hat r_t)^2$",
-            ha="center", va="center", fontsize=24, transform=ax.transAxes)
-    save(fig, output / "figure_1_1.png")
-
-    # Reproduce the group's original Colab illustration. This synthetic
-    # fixed 0.5-unit-per-row cost is not the model's asymmetric cost rule.
-    rng = np.random.RandomState(42)
-    price = 100 + np.cumsum(rng.normal(0, 1, 200))
-    predicted = price + rng.normal(0, 0.5, 200)
-    frame = pd.DataFrame({"actual": price, "predicted": predicted})
-    position = np.where(frame.predicted.diff() > 0, 1, -1)
-    profit = position * frame.actual.diff()
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.bar(["No Transaction Cost", "With Transaction Cost"],
-           [float(profit.sum()), float((profit - 0.5).sum())])
-    ax.set_title("Trading Friction Impact")
-    ax.set_ylabel("Total Profit")
-    save(fig, output / "figure_1_4.png")
-    build_loss_figures(output, ROOT / "data/PSE-PSEI_2018-01-01_latest.csv")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -99,8 +67,7 @@ def main(argv: list[str] | None = None) -> None:
     tests.to_csv(results / "significance.csv", index=False)
     plot_significance(tests, unit, summary_path.name, results / "significance.png")
     plot_cost_comparison(cost, 0.00296, 0.00396, results / "cost_comparison.png")
-    with plt.rc_context(plt.rcParamsDefault):
-        build_chapter_1(results / "chapter1")
+    build_chapter_1(results / "chapter1", ROOT / "data/PSE-PSEI_2018-01-01_latest.csv")
     print("Rebuilt benchmark, significance, SOP 2 and Chapter 1 outputs.")
     print("Cost table: results/cost_comparison.csv; source diagrams: docs/figure_3_1.png, figure_3_2.png")
 

@@ -1,6 +1,6 @@
 """Reproducible, data-based Chapter 1 illustrations for SOP 1 and SOP 2.
 
-Run in Google Colab or locally. The curves use one *observed* PSEi daily return,
+Run locally, or optionally in Colab for Chapter 1 only. The curves use one *observed* PSEi daily return,
 the repo's tanh position transformation, and its asymmetric cost formula. Grid
 points are hypothetical candidate forecasts, not trained-model predictions.
 """
@@ -10,6 +10,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -144,6 +147,35 @@ def build(output_dir: Path, csv_path: Path):
             "selection": "First pre-test positive return between the two cost coefficients after 252 prior returns; illustrative, not representative"}
 
 
+def build_all(output_dir: Path, csv_path: Path):
+    """Generate all four Chapter 1 illustrations, without model training."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with plt.rc_context(plt.rcParamsDefault):
+        fig, ax = plt.subplots(figsize=(8, 2.2))
+        ax.axis("off")
+        ax.text(0.5, 0.5, r"$\mathrm{MSE}=\frac{1}{N}\sum_{t=1}^{N}(r_t-\hat r_t)^2$",
+                ha="center", va="center", fontsize=24, transform=ax.transAxes)
+        fig.savefig(output_dir / "figure_1_1.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # Original group illustration: synthetic prices and a fixed cost,
+        # rather than the current model's asymmetric transaction-cost rule.
+        rng = np.random.RandomState(42)
+        price = 100 + np.cumsum(rng.normal(0, 1, 200))
+        predicted = price + rng.normal(0, 0.5, 200)
+        frame = pd.DataFrame({"actual": price, "predicted": predicted})
+        position = np.where(frame.predicted.diff() > 0, 1, -1)
+        profit = position * frame.actual.diff()
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.bar(["No Transaction Cost", "With Transaction Cost"],
+               [float(profit.sum()), float((profit - 0.5).sum())])
+        ax.set_title("Trading Friction Impact")
+        ax.set_ylabel("Total Profit")
+        fig.savefig(output_dir / "figure_1_4.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        return build(output_dir, csv_path)
+
+
 if __name__ == "__main__":
     repo = Path(__file__).resolve().parents[1]
-    build(repo / "results/chapter1", repo / "data/PSE-PSEI_2018-01-01_latest.csv")
+    build_all(repo / "results/chapter1", repo / "data/PSE-PSEI_2018-01-01_latest.csv")
