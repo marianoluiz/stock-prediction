@@ -34,6 +34,12 @@ drifts. This file is about pitfalls that aren't obvious from the code alone.
   `significance.py`, the charts and the summary all branch on "are there
   stock rows?" -- keep that branch when changing any of them.
   `docs/system-and-results.md` is the current full write-up.
+- SOP 2 (current Objective 2) is the MSE-calibration-weight sweep, not the
+  "directional penalties" objective still written in `docs/algorithm.md` /
+  `docs/methodology_chapter3.md`. `scripts/sop2_sweep.py` (step 4 of
+  `run_thesis.py`, CPU by default) writes everything to `results/sop2/`
+  (`lambda_0p7/` = λ 0.7). Rerunning overwrites the committed runs that
+  `scripts/build_paper_figures.py` hash-checks for paper Figure 4.3.
   US tickers were dropped; older `results/` and `docs/run-result*.md` may
   still describe US runs.
 - Symbols are `PSE:TICKER` (routed to tvDatafeed). The `:` is illegal in

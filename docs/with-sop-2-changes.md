@@ -42,10 +42,10 @@ assert that embedded images are byte-identical to standalone PNGs in `main`.
 - `benchmark.py` now saves predicted returns in its daily CSV and accepts
   `--device cpu` for a reproducible CPU sweep. Its default device selection
   and Mariano's primary experiment are unchanged.
-- `sop2_compare.py` checks the matching PSEi fold dates and reconstructs
+- `sop2_compare.py` (since moved to `scripts/`) checks the matching PSEi fold dates and reconstructs
   reported RMSE and returns from daily rows before writing the comparison
   CSV, Markdown table, and sensitivity chart.
-- `results/sop2_lambda_*` contains the five completed fold-level and daily
+- `results/sop2_lambda_*` (since reorganized into `results/sop2/lambda_<x>/`, run by `scripts/sop2_sweep.py`) contains the five completed fold-level and daily
   result sets plus run logs. `SOP2_REPRODUCTION.md` gives the exact rerun
   command and cached-data hash.
 

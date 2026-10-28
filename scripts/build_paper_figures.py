@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 from scripts.cost_comparison import plot as plot_cost_comparison  # noqa: E402
 from scripts.plot_loss_comparison import plot_comparisons  # noqa: E402
 from scripts.significance import index_tests, plot as plot_significance  # noqa: E402
-from sop2_compare import main as compare_lambdas  # noqa: E402
+from scripts.sop2_compare import DEFAULT_LAMBDAS, SWEEP_DIR, compare as compare_lambdas  # noqa: E402
 
 BENCHMARK = Path("results/benchmark_summary_psei_20261025_203842.csv")
 INPUT_HASHES = {
@@ -38,25 +38,25 @@ INPUT_HASHES = {
         "54eafd5c59ba59d50dd9e7bbec0a94b7c885312e60e49de344251d8d85febe09",
     Path("results/cost_comparison.csv"):
         "c44a12f56137980eea16c2bf422bbe085b4545fb04aa04dad3024f7522a26a1e",
-    Path("results/sop2_lambda_00.csv"):
+    Path("results/sop2/lambda_0p0/benchmark.csv"):
         "638a79d8fc1dc72879e7c528dfdeeb698c6203aea53625428429edaf6c8f1950",
-    Path("results/sop2_lambda_00_daily.csv"):
+    Path("results/sop2/lambda_0p0/benchmark_daily.csv"):
         "5a5e2e0237acaa8e6d3e7c2ae41193280fbffa90da773893d8af69ad7af8d6b5",
-    Path("results/sop2_lambda_03.csv"):
+    Path("results/sop2/lambda_0p3/benchmark.csv"):
         "558e1fe9d3e9486c5cb65429df43b0fe3088c71fbd85d11a8ae8f371797d4407",
-    Path("results/sop2_lambda_03_daily.csv"):
+    Path("results/sop2/lambda_0p3/benchmark_daily.csv"):
         "00b35aa0fef5e844829c526b71e8cb5028fd2a5e5580967bb97dc63b6c24dac7",
-    Path("results/sop2_lambda_07.csv"):
+    Path("results/sop2/lambda_0p7/benchmark.csv"):
         "f0cc1dc657b7fa7180b025314896f40ca845ff13d815c1c85431177c6fbcf9eb",
-    Path("results/sop2_lambda_07_daily.csv"):
+    Path("results/sop2/lambda_0p7/benchmark_daily.csv"):
         "69b6d8e9e432a0e43764cb24b02687f941977b984f326e64242bab21bc79fe7b",
-    Path("results/sop2_lambda_01.csv"):
+    Path("results/sop2/lambda_1p0/benchmark.csv"):
         "88d600eeb225b9e9ed69aa96f9aeda0b100afedec4165756ce220c3e3e4cae8c",
-    Path("results/sop2_lambda_01_daily.csv"):
+    Path("results/sop2/lambda_1p0/benchmark_daily.csv"):
         "72ed087bc599f68fd81944ec68fdf309fe6aa450269d6b9016613cefaa0aa3c4",
-    Path("results/sop2_lambda_02.csv"):
+    Path("results/sop2/lambda_2p0/benchmark.csv"):
         "3e9010e335a60657bc2369fe75e9f27763632980675be358e0a01bf8554fc286",
-    Path("results/sop2_lambda_02_daily.csv"):
+    Path("results/sop2/lambda_2p0/benchmark_daily.csv"):
         "8b3defbb2027c0d8e14adf2f0b482a5660c377394d901f28934578d5d9528b32",
 }
 CHAPTER_1 = {
@@ -69,7 +69,7 @@ CHAPTER_3 = ("figure_3_1.png", "figure_3_2.png")
 CHAPTER_4 = {
     "figure_4_1.png": "per_fold_geo_diff.png",
     "figure_4_2.png": "strategy_comparison.png",
-    "figure_4_3.png": "sop2_lambda_sensitivity.png",
+    "figure_4_3.png": "sop2/sensitivity.png",
     "figure_4_4.png": "significance.png",
     "figure_4_5.png": "cost_comparison.png",
 }
@@ -177,20 +177,10 @@ def build_chapter_4(output: Path) -> None:
         shutil.copyfile(charts / "strategy_comparison.png", output / "figure_4_2.png")
 
         # sop2_compare.py verifies matching test dates and reconstructs its
-        # metrics from daily rows. Run it on a temporary copy of the inputs.
+        # metrics from daily rows. Write its outputs to a temporary folder.
         sweep = temp / "sweep"
-        sweep.mkdir()
-        for source in sorted((ROOT / "results").glob("sop2_lambda_*.csv")):
-            if source.name.startswith("sop2_lambda_comparison"):
-                continue
-            shutil.copyfile(source, sweep / source.name)
-        argv = sys.argv
-        try:
-            sys.argv = ["sop2_compare.py", "--results", str(sweep)]
-            compare_lambdas()
-        finally:
-            sys.argv = argv
-        shutil.copyfile(sweep / "sop2_lambda_sensitivity.png", output / "figure_4_3.png")
+        compare_lambdas(ROOT / SWEEP_DIR, list(DEFAULT_LAMBDAS), out_dir=sweep)
+        shutil.copyfile(sweep / "sensitivity.png", output / "figure_4_3.png")
 
         tests, unit = index_tests(summary_path)
         plot_significance(tests, unit, summary_path.name, output / "figure_4_4.png")

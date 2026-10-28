@@ -6,16 +6,16 @@
     "results/benchmark_summary_psei_20261025_203842.csv": "1f5904d9febf36dd0c1aff1dc9d40e0d5eb6cd2e1b5101de5d51db30f9affc31",
     "results/benchmark_summary_psei_20261025_203842_daily.csv": "54eafd5c59ba59d50dd9e7bbec0a94b7c885312e60e49de344251d8d85febe09",
     "results/cost_comparison.csv": "c44a12f56137980eea16c2bf422bbe085b4545fb04aa04dad3024f7522a26a1e",
-    "results/sop2_lambda_00.csv": "638a79d8fc1dc72879e7c528dfdeeb698c6203aea53625428429edaf6c8f1950",
-    "results/sop2_lambda_00_daily.csv": "5a5e2e0237acaa8e6d3e7c2ae41193280fbffa90da773893d8af69ad7af8d6b5",
-    "results/sop2_lambda_03.csv": "558e1fe9d3e9486c5cb65429df43b0fe3088c71fbd85d11a8ae8f371797d4407",
-    "results/sop2_lambda_03_daily.csv": "00b35aa0fef5e844829c526b71e8cb5028fd2a5e5580967bb97dc63b6c24dac7",
-    "results/sop2_lambda_07.csv": "f0cc1dc657b7fa7180b025314896f40ca845ff13d815c1c85431177c6fbcf9eb",
-    "results/sop2_lambda_07_daily.csv": "69b6d8e9e432a0e43764cb24b02687f941977b984f326e64242bab21bc79fe7b",
-    "results/sop2_lambda_01.csv": "88d600eeb225b9e9ed69aa96f9aeda0b100afedec4165756ce220c3e3e4cae8c",
-    "results/sop2_lambda_01_daily.csv": "72ed087bc599f68fd81944ec68fdf309fe6aa450269d6b9016613cefaa0aa3c4",
-    "results/sop2_lambda_02.csv": "3e9010e335a60657bc2369fe75e9f27763632980675be358e0a01bf8554fc286",
-    "results/sop2_lambda_02_daily.csv": "8b3defbb2027c0d8e14adf2f0b482a5660c377394d901f28934578d5d9528b32"
+    "results/sop2/lambda_0p0/benchmark.csv": "638a79d8fc1dc72879e7c528dfdeeb698c6203aea53625428429edaf6c8f1950",
+    "results/sop2/lambda_0p0/benchmark_daily.csv": "5a5e2e0237acaa8e6d3e7c2ae41193280fbffa90da773893d8af69ad7af8d6b5",
+    "results/sop2/lambda_0p3/benchmark.csv": "558e1fe9d3e9486c5cb65429df43b0fe3088c71fbd85d11a8ae8f371797d4407",
+    "results/sop2/lambda_0p3/benchmark_daily.csv": "00b35aa0fef5e844829c526b71e8cb5028fd2a5e5580967bb97dc63b6c24dac7",
+    "results/sop2/lambda_0p7/benchmark.csv": "f0cc1dc657b7fa7180b025314896f40ca845ff13d815c1c85431177c6fbcf9eb",
+    "results/sop2/lambda_0p7/benchmark_daily.csv": "69b6d8e9e432a0e43764cb24b02687f941977b984f326e64242bab21bc79fe7b",
+    "results/sop2/lambda_1p0/benchmark.csv": "88d600eeb225b9e9ed69aa96f9aeda0b100afedec4165756ce220c3e3e4cae8c",
+    "results/sop2/lambda_1p0/benchmark_daily.csv": "72ed087bc599f68fd81944ec68fdf309fe6aa450269d6b9016613cefaa0aa3c4",
+    "results/sop2/lambda_2p0/benchmark.csv": "3e9010e335a60657bc2369fe75e9f27763632980675be358e0a01bf8554fc286",
+    "results/sop2/lambda_2p0/benchmark_daily.csv": "8b3defbb2027c0d8e14adf2f0b482a5660c377394d901f28934578d5d9528b32"
   },
   "illustrative_values": {
     "illustrative_mse": 0.24416974646961934,
@@ -101,7 +101,7 @@
       "paper_sha256": "40bd74c09e1b1e269d8a312f983778bfaa7f191e6f589877ca0937f01c9f6ff6",
       "generated": "figures/generated/figure_4_3.png",
       "generated_sha256": "32a1ea5f23b6a9414526b0ec3eb6322c8d5724b551ecf9515e81cb746dd6afbe",
-      "source_detail": "sop2_lambda_sensitivity.png",
+      "source_detail": "sop2/sensitivity.png",
       "status": "CSV replot"
     },
     {

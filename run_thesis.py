@@ -10,15 +10,20 @@ The study's primary series is the PSEi index (PSE:PSEI). Runs, in order:
   3. scripts/cost_comparison.py --walk-forward --folds 4
                                  with-cost vs without-cost comparison on the
                                  same folds
-  4. main.py --compare           one worked example (PSE:PSEI, single 70/15/15
+  4. scripts/sop2_sweep.py       SOP 2: profit-aware benchmark retrained at
+                                 lambda 0, 0.3, 0.7, 1.0, 2.0 (CPU), compared
+                                 in results/sop2/
+  5. main.py --compare           one worked example (PSE:PSEI, single 70/15/15
                                  split): loss/profit curves and a full trade log
 
 With --stocks, steps 1-3 instead run the PSEi constituents (29 stocks plus
 the index, single split; the cost comparison uses six of the stocks), as the
-study did before it was narrowed to the index.
+study did before it was narrowed to the index; the SOP 2 sweep is index-only
+and is skipped.
 
 Outputs land in results/ (see README.md, "Thesis run"). Each step uses the
-defaults: 50 epochs, loss lambda 0.7, buy cost 0.296%, sell cost 0.396%.
+defaults: 50 epochs, loss lambda 0.7 (the SOP 2 sweep varies it), buy cost
+0.296%, sell cost 0.396%.
 
 Usage:
     .venv/Scripts/python.exe run_thesis.py
@@ -41,6 +46,7 @@ STEPS = [
     ("Benchmark + comparison charts", ["benchmark.py", *WALK_FORWARD, "--charts"]),
     ("Significance test", ["scripts/significance.py"]),
     ("Cost comparison", ["scripts/cost_comparison.py", *WALK_FORWARD]),
+    ("SOP 2 lambda sweep", ["scripts/sop2_sweep.py"]),
     ("Worked example (PSE:PSEI)", ["main.py", "--compare", "--trade-log", "--symbol", "PSE:PSEI"]),
 ]
 STOCK_STEPS = [

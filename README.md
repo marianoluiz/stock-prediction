@@ -88,9 +88,10 @@ One command produces every result and figure:
 .venv/Scripts/python.exe run_thesis.py
 ```
 
-It runs four steps on the PSEi, in order. All of them use the defaults: 50
-epochs, lambda 0.7, buy cost 0.296%, sell cost 0.396%, seed 42. With a GPU,
-expect roughly 5 minutes in total. You can also run any step on its own.
+It runs five steps on the PSEi, in order. All of them use the defaults: 50
+epochs, lambda 0.7, buy cost 0.296%, sell cost 0.396%, seed 42; step 4 varies
+lambda. With a GPU, steps 1-3 and 5 take roughly 5 minutes; step 4 trains on
+CPU and adds about 15. You can also run any step on its own.
 `run_thesis.py --stocks` runs the 29-stock version of steps 1-3 instead.
 
 | # | Command | What it produces (in `results/`) |
@@ -98,7 +99,8 @@ expect roughly 5 minutes in total. You can also run any step on its own.
 | 1 | `benchmark.py --walk-forward --folds 4 --charts` | `benchmark_summary_psei_<time>.csv`: one row per fold and loss. `..._daily.csv`: every test day's position and net return for both GRUs, buy & hold and the TA baselines. `..._summary.txt`: means, per-fold table, win counts, baselines, position behaviour, fold stability, degenerate runs. `..._charts/`: the figures listed below. |
 | 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: daily paired test of profit-aware minus MSE (Newey-West standard errors, ~630 test days), hit rate vs 50%, and a fold-level sign test. With a `--stocks` CSV it runs the paired t-test across the 29 stocks instead. |
 | 3 | `scripts/cost_comparison.py --walk-forward --folds 4` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost, on the same 4 folds. |
-| 4 | `main.py --compare --trade-log --symbol PSE:PSEI` | Worked example on the single 70/15/15 split. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
+| 4 | `scripts/sop2_sweep.py` | SOP 2 calibration-weight sweep, all in `results/sop2/`: one `lambda_<x>/` folder per λ (0, 0.3, 0.7, 1.0, 2.0; `0p3` = 0.3) with that run's `benchmark.csv`, `_daily.csv`, `_summary.txt` and `run.log`, plus `comparison.csv`/`.md`, `sensitivity.png` and `manifest.json` (settings, git revision, data hash). Runs on CPU to match the committed sweep; `--compare-only` rebuilds the comparison without training. |
+| 5 | `main.py --compare --trade-log --symbol PSE:PSEI` | Worked example on the single 70/15/15 split. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
 
 Figures in `_charts/` (index-only walk-forward run: one bar group per fold,
 plus the mean):
@@ -181,6 +183,8 @@ argument and its default is listed in [docs/arguments.md](docs/arguments.md).
 │   ├── predict.py            # Forecast the next N days with a saved model
 │   ├── significance.py       # Profit-aware minus MSE significance tests
 │   ├── cost_comparison.py    # With-cost vs without-cost comparison
+│   ├── sop2_sweep.py         # SOP 2: profit-aware run at several lambdas -> results/sop2/
+│   ├── sop2_compare.py       # SOP 2 comparison table and sensitivity chart
 │   └── plot_loss_comparison.py  # Benchmark comparison figures
 ├── models/gru_model.py       # 2-layer GRU -> LayerNorm -> Linear (tanh-bounded head)
 ├── training/train.py         # Training loop, per-epoch metrics, early stopping

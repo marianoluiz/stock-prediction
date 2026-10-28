@@ -15,7 +15,7 @@ manifest with source and SHA-256 information.
 | 1.4 | Trading friction illustration | Same original Colab: a fixed 0.5-unit deduction per simulated observation. |
 | 3.1–3.2 | PSEi workflow and architecture | Exact diagrams from the current paper, carried through unchanged. The gallery copies these images; it does not redraw their shapes. |
 | 4.1–4.2 | Per-fold geometric difference and reference strategies | Replotted from the committed PSEi benchmark CSV using `scripts/plot_loss_comparison.py`. |
-| 4.3 | MSE calibration-weight sensitivity | Recalculated from the five committed lambda runs using `sop2_compare.py`. |
+| 4.3 | MSE calibration-weight sensitivity | Recalculated from the five committed lambda runs in `results/sop2/` using `scripts/sop2_compare.py`. |
 | 4.4 | Paired differences and intervals | Recomputed from the benchmark daily CSV using `scripts/significance.py`. |
 | 4.5 | Cost-in-loss ablation | Replotted from `results/cost_comparison.csv` using `scripts/cost_comparison.py`. |
 

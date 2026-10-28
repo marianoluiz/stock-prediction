@@ -1,6 +1,8 @@
 """Compare matched PSEi profit-aware runs across MSE calibration weights.
 
-Run after benchmark.py has produced sop2_lambda_XX.csv and _daily.csv files.
+Run after scripts/sop2_sweep.py has produced results/sop2/lambda_<tag>/
+benchmark.csv and benchmark_daily.csv for every weight. Writes
+comparison.csv, comparison.md and sensitivity.png into the same folder.
 This reports fold means descriptively; it does not tune lambda on test data.
 """
 
@@ -15,6 +17,9 @@ from statistics import mean, pstdev
 
 import matplotlib.pyplot as plt
 
+SWEEP_DIR = Path("results/sop2")
+DEFAULT_LAMBDAS = (0.0, 0.3, 0.7, 1.0, 2.0)
+
 
 def read_csv(path: Path) -> list[dict]:
     with path.open(newline="", encoding="utf-8-sig") as handle:
@@ -22,7 +27,13 @@ def read_csv(path: Path) -> list[dict]:
 
 
 def tag(value: float) -> str:
-    return f"{value:g}".replace(".", "").zfill(2)
+    """Folder-safe lambda label: 0 -> 0p0, 0.3 -> 0p3, 1 -> 1p0, 0.25 -> 0p25."""
+    text = f"{value:g}"
+    return (text if "." in text else text + ".0").replace(".", "p")
+
+
+def run_dir(results: Path, weight: float) -> Path:
+    return results / f"lambda_{tag(weight)}"
 
 
 def value(row: dict, key: str) -> float:
@@ -31,18 +42,25 @@ def value(row: dict, key: str) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results", type=Path, default=Path("results"))
-    parser.add_argument("--lambdas", nargs="+", type=float,
-                        default=[0.0, 0.3, 0.7, 1.0, 2.0])
+    parser.add_argument("--results", type=Path, default=SWEEP_DIR,
+                        help="Sweep folder holding lambda_<tag>/ runs (default: results/sop2)")
+    parser.add_argument("--lambdas", nargs="+", type=float, default=list(DEFAULT_LAMBDAS))
     args = parser.parse_args()
+    compare(args.results, args.lambdas)
 
+
+def compare(results: Path, lambdas: list[float], out_dir: Path | None = None) -> None:
+    """Verify matched runs and write comparison.csv/.md and sensitivity.png
+    into ``out_dir`` (default: ``results``)."""
+    out_dir = results if out_dir is None else out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
     reference_windows: dict[int, tuple[str, str, int]] | None = None
     reference_dates: dict[int, list[str]] | None = None
     mse_reference: dict[int, dict] | None = None
 
-    for weight in args.lambdas:
-        stem = args.results / f"sop2_lambda_{tag(weight)}"
+    for weight in lambdas:
+        stem = run_dir(results, weight) / "benchmark"
         summary = read_csv(stem.with_suffix(".csv"))
         daily = read_csv(Path(f"{stem}_daily.csv"))
         pa = {int(row["fold"]): row for row in summary
@@ -115,7 +133,7 @@ def main() -> None:
                 "degenerate": row["degenerate"],
             })
 
-    out_csv = args.results / "sop2_lambda_comparison.csv"
+    out_csv = out_dir / "comparison.csv"
     with out_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(records[0]))
         writer.writeheader()
@@ -139,7 +157,7 @@ def main() -> None:
         "One-side folds |",
         "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for weight in args.lambdas:
+    for weight in lambdas:
         subset = [row for row in records if row["lambda"] == weight]
         means = [mean(value(row, key) for row in subset) for key in keys]
         one_side = sum(row["degenerate"] == "True" for row in subset)
@@ -148,7 +166,7 @@ def main() -> None:
             f"{means[2]:.3f} | {means[3]:.5f} | {means[4]:+.4%} | "
             f"{means[5]:+.4%} | {means[6]:.2%} | {one_side}/4 |"
         )
-    if 0.0 in args.lambdas and 0.7 in args.lambdas:
+    if 0.0 in lambdas and 0.7 in lambdas:
         plain = {row["fold"]: row for row in records if row["lambda"] == 0.0}
         calibrated = {row["fold"]: row for row in records
                       if row["lambda"] == 0.7}
@@ -185,7 +203,7 @@ def main() -> None:
               "magnitude was constant. This single-seed test sweep is "
               "descriptive and should not be used to select a lambda on the "
               "held-out test windows."]
-    out_md = args.results / "sop2_lambda_comparison.md"
+    out_md = out_dir / "comparison.md"
     out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     panels = (
@@ -196,7 +214,7 @@ def main() -> None:
     )
     fig, axes = plt.subplots(2, 2, figsize=(10, 7), constrained_layout=True)
     for ax, (key, title, as_percent) in zip(axes.flat, panels):
-        x_values = list(args.lambdas)
+        x_values = list(lambdas)
         y_values = [mean(value(row, key) for row in records
                          if row["lambda"] == weight) for weight in x_values]
         if as_percent:
@@ -218,7 +236,7 @@ def main() -> None:
     fig.suptitle("PSEi sensitivity to the MSE calibration weight\n"
                  "Four held-out folds, seed 42; dots = folds, line = mean",
                  fontsize=13)
-    out_png = args.results / "sop2_lambda_sensitivity.png"
+    out_png = out_dir / "sensitivity.png"
     fig.savefig(out_png, dpi=170)
     plt.close(fig)
     print(out_csv)
