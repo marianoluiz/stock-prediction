@@ -1,0 +1,13 @@
+PSEi MSE-calibration comparison: four test folds, seed 42, 50 epochs.
+Costs: buy 0.296%, sell 0.396%. Matched CPU runs.
+Values are arithmetic means of fold metrics, not pooled portfolio returns.
+Lambda 0 vs 0.7 is the primary contrast; other weights are exploratory.
+One-side folds count positions keeping the same sign; magnitude may vary.
+The test-window sweep does not select a generally optimal lambda.
+
+ lambda     rmse  mean_abs_predicted_return  mean_abs_position  turnover_per_day  additive_return  geometric_return  sharpe_like  directional_accuracy  one_side_folds  n_folds
+    0.0 0.066392                   0.065726           0.999900          0.006339         0.032585          0.024349     0.277128              0.507046               4        4
+    0.3 0.014983                   0.010534           0.659013          0.004569         0.020533          0.016940     0.275443              0.507046               4        4
+    0.7 0.012030                   0.005388           0.383190          0.003016         0.010945          0.009688     0.272885              0.507046               4        4
+    1.0 0.011290                   0.003330           0.244358          0.002275         0.006361          0.005825     0.269402              0.507046               4        4
+    2.0 0.010834                   0.000550           0.041337          0.000861        -0.000605         -0.000625    -0.200563              0.494546               4        4

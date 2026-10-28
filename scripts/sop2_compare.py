@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import subprocess
+import sys
 from collections import defaultdict
 from math import prod, sqrt
 from pathlib import Path
 from statistics import mean, pstdev
 
 import matplotlib.pyplot as plt
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_csv(path: Path) -> list[dict]:
@@ -29,12 +35,32 @@ def value(row: dict, key: str) -> float:
     return float(row[key])
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, default=Path("results"))
     parser.add_argument("--lambdas", nargs="+", type=float,
                         default=[0.0, 0.3, 0.7, 1.0, 2.0])
-    args = parser.parse_args()
+    parser.add_argument("--train", action="store_true",
+                        help="Rerun the matched four-fold CPU experiments before comparing")
+    args = parser.parse_args(argv)
+    if not args.lambdas or any(weight < 0 for weight in args.lambdas):
+        parser.error("Calibration weights must be nonnegative")
+    if len(set(args.lambdas)) != len(args.lambdas):
+        parser.error("Calibration weights must be unique")
+    if len({tag(weight) for weight in args.lambdas}) != len(args.lambdas):
+        parser.error("Calibration weights must have distinct output file tags")
+    args.results = args.results.resolve()
+    args.results.mkdir(parents=True, exist_ok=True)
+    if args.train:
+        environment = {**os.environ, "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"}
+        for weight in args.lambdas:
+            command = [sys.executable, "benchmark.py", "--symbols", "PSE:PSEI",
+                       "--start", "2018-01-01", "--walk-forward", "--folds", "4",
+                       "--eval-fraction", "0.30", "--epochs", "50", "--seed", "42",
+                       "--device", "cpu", "--buy-cost", "0.00296", "--sell-cost", "0.00396",
+                       "--loss-lambda", str(weight), "--output",
+                       str(args.results / f"sop2_lambda_{tag(weight)}.csv")]
+            subprocess.run(command, cwd=ROOT, env=environment, check=True)
 
     records: list[dict] = []
     reference_windows: dict[int, tuple[str, str, int]] | None = None
@@ -121,72 +147,32 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(records)
 
-    keys = ("rmse", "mean_abs_predicted_return", "mean_abs_position",
-            "turnover_per_day", "additive_return", "geometric_return",
-            "directional_accuracy")
-    lines = [
-        "# SOP 2: PSEi lambda comparison",
-        "",
-        "Same cached PSEi data, four test windows, seed 42, 50 epochs, "
-        "and asymmetric buy/sell costs (0.296%/0.396%) for every run.",
-        "Lambda 0 versus 0.7 is the planned comparison; other weights are "
-        "exploratory sensitivity checks. Values below are arithmetic means "
-        "of four fold-level results, not a pooled investment return.",
-        "",
-        "| λ | RMSE | Mean absolute predicted return | Mean absolute position | "
-        "Turnover/day | Mean additive return | Mean geometric return | "
-        "Directional accuracy | "
-        "One-side folds |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
+    metrics = ("rmse", "mean_abs_predicted_return", "mean_abs_position",
+               "turnover_per_day", "additive_return", "geometric_return",
+               "sharpe_like", "directional_accuracy")
+    aggregate = []
     for weight in args.lambdas:
         subset = [row for row in records if row["lambda"] == weight]
-        means = [mean(value(row, key) for row in subset) for key in keys]
-        one_side = sum(row["degenerate"] == "True" for row in subset)
-        lines.append(
-            f"| {weight:g} | {means[0]:.5f} | {means[1]:.5f} | "
-            f"{means[2]:.3f} | {means[3]:.5f} | {means[4]:+.4%} | "
-            f"{means[5]:+.4%} | {means[6]:.2%} | {one_side}/4 |"
-        )
-    if 0.0 in args.lambdas and 0.7 in args.lambdas:
-        plain = {row["fold"]: row for row in records if row["lambda"] == 0.0}
-        calibrated = {row["fold"]: row for row in records
-                      if row["lambda"] == 0.7}
-        difference = lambda key: mean(value(calibrated[f], key) - value(plain[f], key)
-                                      for f in plain)
-        rmse_wins = sum(value(calibrated[f], "rmse") < value(plain[f], "rmse")
-                        for f in plain)
-        profit_wins = sum(value(calibrated[f], "geometric_return") >
-                          value(plain[f], "geometric_return") for f in plain)
-        lines += ["", "## Planned contrast: λ = 0.7 minus λ = 0", "",
-                  f"- Mean fold RMSE difference: {difference('rmse'):+.5f}; "
-                  f"lower RMSE in {rmse_wins}/4 folds.",
-                  f"- Mean absolute predicted-return difference: "
-                  f"{difference('mean_abs_predicted_return'):+.5f}.",
-                  f"- Mean absolute position difference: "
-                  f"{difference('mean_abs_position'):+.3f}.",
-                  f"- Mean fold geometric-return difference: "
-                  f"{100*difference('geometric_return'):+.2f} percentage "
-                  f"points; higher return in {profit_wins}/4 folds."]
-    lines += ["", "## Per-fold results", "",
-              "| λ | Fold | Dates | RMSE | Geometric return | "
-              "Mean predicted return | Mean position | Side switches |",
-              "|---:|---:|---|---:|---:|---:|---:|---:|"]
-    for row in records:
-        lines.append(
-            f"| {row['lambda']:g} | {row['fold']} | {row['test_start']} "
-            f"to {row['test_end']} | {value(row, 'rmse'):.5f} | "
-            f"{value(row, 'geometric_return'):+.4%} | "
-            f"{value(row, 'mean_predicted_return'):+.5f} | "
-            f"{value(row, 'mean_position'):+.3f} | {row['side_switches']} |"
-        )
-    lines += ["", "The one-side flag means the executed position kept the "
-              "same sign throughout a fold. It does not mean the position's "
-              "magnitude was constant. This single-seed test sweep is "
-              "descriptive and should not be used to select a lambda on the "
-              "held-out test windows."]
-    out_md = args.results / "sop2_lambda_comparison.md"
-    out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        aggregate.append({
+            "lambda": weight,
+            **{key: mean(value(row, key) for row in subset) for key in metrics},
+            "one_side_folds": sum(row["degenerate"] == "True" for row in subset),
+            "n_folds": len(subset),
+        })
+    table = pd.DataFrame(aggregate)
+    summary_csv = args.results / "sop2_lambda_summary.csv"
+    table.to_csv(summary_csv, index=False)
+    out_summary = args.results / "sop2_lambda_comparison_summary.txt"
+    description = (
+        "PSEi MSE-calibration comparison: four test folds, seed 42, 50 epochs.\n"
+        "Costs: buy 0.296%, sell 0.396%. Matched CPU runs.\n"
+        "Values are arithmetic means of fold metrics, not pooled portfolio returns.\n"
+        "Lambda 0 vs 0.7 is the primary contrast; other weights are exploratory.\n"
+        "One-side folds count positions keeping the same sign; magnitude may vary.\n"
+        "The test-window sweep does not select a generally optimal lambda.\n\n"
+    )
+    out_summary.write_text(description + table.to_string(index=False) + "\n",
+                           encoding="utf-8")
 
     panels = (
         ("rmse", "Test RMSE", False),
@@ -222,7 +208,8 @@ def main() -> None:
     fig.savefig(out_png, dpi=170)
     plt.close(fig)
     print(out_csv)
-    print(out_md)
+    print(summary_csv)
+    print(out_summary)
     print(out_png)
 
 

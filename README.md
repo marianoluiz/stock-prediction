@@ -77,14 +77,15 @@ first. Training uses CUDA when it is available.
 
 ## Thesis run
 
-The separate [`with-sop-2` paper](docs/with-sop-2.docx) has a numbered
-[11-figure gallery](figures/README.md). Open the
-[PSEi figure notebook](notebooks/PSEi_Thesis_Figures_Colab.ipynb) in Google
-Colab and run all cells to display the exact paper figures and rebuild their
-available source plots from the committed results. The paper is the 28 October
-2026 export of the live PSEi revision. See the [figure and algorithm alignment
-audit](docs/figure-alignment-2026-10-28.md) and [restored detailed algorithm](docs/algorithm-with-sop-2.md). This gallery does not
-retrain the models; the full experiment command below does.
+Rebuild the saved PSEi figures and numerical tables **without training**:
+
+```
+.venv/Scripts/python.exe run_thesis.py --figures-only
+```
+
+For Google Colab, open [scripts/PSEi_Thesis_Figures_Colab.ipynb](scripts/PSEi_Thesis_Figures_Colab.ipynb)
+and run all cells. It clones this branch, rebuilds the saved plots, and displays
+the figures and tables. It uses the committed CSVs; it does not train models.
 
 One command produces every result and figure:
 
@@ -92,9 +93,10 @@ One command produces every result and figure:
 .venv/Scripts/python.exe run_thesis.py
 ```
 
-It runs four steps on the PSEi, in order. All of them use the defaults: 50
-epochs, lambda 0.7, buy cost 0.296%, sell cost 0.396%, seed 42. With a GPU,
-expect roughly 5 minutes in total. You can also run any step on its own.
+It runs six steps on the PSEi, in order. The primary experiment uses 50
+epochs, lambda 0.7, buy cost 0.296%, sell cost 0.396%, and seed 42. Step 5
+adds the matched CPU calibration sweep; it takes longer than the primary
+GPU benchmark. You can also run any step on its own.
 `run_thesis.py --stocks` runs the 29-stock version of steps 1-3 instead.
 
 | # | Command | What it produces (in `results/`) |
@@ -103,6 +105,9 @@ expect roughly 5 minutes in total. You can also run any step on its own.
 | 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: daily paired test of profit-aware minus MSE (Newey-West standard errors, ~630 test days), hit rate vs 50%, and a fold-level sign test. With a `--stocks` CSV it runs the paired t-test across the 29 stocks instead. |
 | 3 | `scripts/cost_comparison.py --walk-forward --folds 4` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost, on the same 4 folds. |
 | 4 | `main.py --compare --trade-log --symbol PSE:PSEI` | Worked example on the single 70/15/15 split. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
+| 5 | `scripts/sop2_compare.py --train` | Five matched CPU runs at lambda 0, 0.3, 0.7, 1 and 2. Saves each fold/daily CSV and summary, then `sop2_lambda_comparison.csv`, `sop2_lambda_summary.csv`, `sop2_lambda_comparison_summary.txt` and `sop2_lambda_sensitivity.png`. |
+| 6 | `scripts/build_paper_figures.py --latest` | Replots the latest PSEi benchmark, significance and cost charts, refreshes SOP 2 tables, and generates the four Chapter 1 figures and their numerical curve data in `results/chapter1/`. |
+
 
 Figures in `_charts/` (index-only walk-forward run: one bar group per fold,
 plus the mean):
@@ -126,6 +131,58 @@ benchmark CSV, without retraining:
 
 Both scripts default to the newest `results/benchmark_summary_*.csv` when
 `--csv` is omitted.
+
+## Figure and table outputs
+
+Outputs use the same folders as `main`: executable helpers in `scripts/`,
+source diagrams in `docs/`, cached data in `data/`, and results in `results/`.
+There is one canonical copy of each generated figure.
+
+For the committed paper results, `<benchmark>` below is
+`results/benchmark_summary_psei_20261025_203842`. A fresh benchmark gets its
+own timestamp. `--figures-only` uses the committed reference run;
+`scripts/build_paper_figures.py --csv <path>` can use another four-fold PSEi run.
+
+| Paper figure | Canonical output |
+|---|---|
+| 1.1, MSE equation | `results/chapter1/figure_1_1.png` |
+| 1.2, MSE versus profit-aware loss | `results/chapter1/figure_1_2.png` |
+| 1.3, effect of calibration weight | `results/chapter1/figure_1_3.png` |
+| 1.4, original transaction-cost illustration | `results/chapter1/figure_1_4.png` |
+| 3.1, workflow diagram | `docs/figure_3_1.png` |
+| 3.2, input-process-output diagram | `docs/figure_3_2.png` |
+| 4.1, per-fold return difference | `<benchmark>_charts/per_fold_geo_diff.png` |
+| 4.2, trading-strategy comparison | `<benchmark>_charts/strategy_comparison.png` |
+| 4.3, lambda sensitivity | `results/sop2_lambda_sensitivity.png` |
+| 4.4, significance | `results/significance.png` |
+| 4.5, cost comparison | `results/cost_comparison.png` |
+
+Chapter 1 figures are illustrations, not model results. Figures 1.2 and 1.3
+use the observed PSEi return on 31 January 2019, 252 prior returns for alpha,
+hypothetical forecasts, and the implemented loss equation. The selection rule
+and all 1,601 forecast-grid values are reproducible in
+`scripts/build_chapter1_loss_figures.py` and `results/chapter1/loss_curve_values.csv`.
+The source data checksum is checked before plotting. Figure 1.4 retains the
+group's synthetic seed-42, fixed 0.5-unit cost example; it is not a backtest
+of the current asymmetric cost model. Chapter 3 diagrams are retained static
+assets, displayed by the notebook rather than regenerated from experiment data.
+
+| Numerical table | Source/output |
+|---|---|
+| Fold results, GRU comparisons and trading-strategy metrics | `<benchmark>.csv` and `<benchmark>_summary.txt` |
+| Test dates, positions and daily net returns | `<benchmark>_daily.csv` |
+| Lambda comparison by fold and means across folds | `results/sop2_lambda_comparison.csv` and `results/sop2_lambda_summary.csv` |
+| Paired tests and confidence intervals | `results/significance.csv` |
+| With/without-cost experiment | `results/cost_comparison.csv` and `results/cost_comparison_summary.txt` |
+
+To rerun only SOP 2, use `scripts/sop2_compare.py --train`. To recompute its
+tables and chart from saved daily/fold CSVs, omit `--train`. This validates
+matching test dates and the fixed MSE comparator, and recomputes RMSE and
+returns from daily observations. The original sweep used Python 3.12.14,
+PyTorch 2.12.0+cpu, NumPy 2.4.6 and pandas 3.0.3; numerical retraining can vary
+with library versions and hardware. All experiments use the cached data;
+updating that data changes the experiment. Do not choose a lambda by its best
+held-out test return: the sweep is descriptive and uses one seed.
 
 ## Metrics
 
@@ -185,7 +242,11 @@ argument and its default is listed in [docs/arguments.md](docs/arguments.md).
 │   ├── predict.py            # Forecast the next N days with a saved model
 │   ├── significance.py       # Profit-aware minus MSE significance tests
 │   ├── cost_comparison.py    # With-cost vs without-cost comparison
-│   └── plot_loss_comparison.py  # Benchmark comparison figures
+│   ├── plot_loss_comparison.py  # Benchmark comparison figures
+│   ├── sop2_compare.py       # Matched calibration sweep and its tables/chart
+│   ├── build_chapter1_loss_figures.py  # Observed-return loss illustrations
+│   ├── build_paper_figures.py # Rebuild all saved-result plots and tables
+│   └── PSEi_Thesis_Figures_Colab.ipynb  # Run-all Colab figures and tables
 ├── models/gru_model.py       # 2-layer GRU -> LayerNorm -> Linear (tanh-bounded head)
 ├── training/train.py         # Training loop, per-epoch metrics, early stopping
 ├── utils/

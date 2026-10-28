@@ -70,7 +70,7 @@ def build(output_dir: Path, csv_path: Path):
     })
     for lam in lambda_values:
         table[f"profit_aware_loss_lambda_{lam:g}"] = losses[lam]
-    table.to_csv(ROOT / "SOP_loss_curve_values.csv", index=False)
+    table.to_csv(ROOT / "loss_curve_values.csv", index=False)
 
     plt.rcParams.update({
         "font.family": "DejaVu Sans",
@@ -106,7 +106,7 @@ def build(output_dir: Path, csv_path: Path):
              "Alpha uses 252 prior returns. Forecast grid points are not trained GRU predictions or test results.",
              ha="center", fontsize=9, color="#53606B")
     fig.subplots_adjust(left=0.12, right=0.97, top=0.81, bottom=0.19)
-    fig.savefig(ROOT / "Figure_1_2_SOP1_data_based_loss_comparison.png", dpi=300)
+    fig.savefig(ROOT / "figure_1_2.png", dpi=300)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 5.7), constrained_layout=False)
@@ -134,7 +134,7 @@ def build(output_dir: Path, csv_path: Path):
              "Alpha uses 252 prior returns. These loss curves do not show trained-model outcomes.",
              ha="center", fontsize=9, color="#53606B")
     fig.subplots_adjust(left=0.12, right=0.97, top=0.81, bottom=0.19)
-    fig.savefig(ROOT / "Figure_1_3_SOP2_data_based_lambda_curves.png", dpi=300)
+    fig.savefig(ROOT / "figure_1_3.png", dpi=300)
     plt.close(fig)
 
     print("Example date:", example_date, "observed return:", actual_return)
@@ -146,4 +146,4 @@ def build(output_dir: Path, csv_path: Path):
 
 if __name__ == "__main__":
     repo = Path(__file__).resolve().parents[1]
-    build(repo / "figures/generated", repo / "data/PSE-PSEI_2018-01-01_latest.csv")
+    build(repo / "results/chapter1", repo / "data/PSE-PSEI_2018-01-01_latest.csv")
