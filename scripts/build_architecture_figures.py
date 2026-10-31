@@ -18,7 +18,8 @@ def box(ax, x, y, w, h, text, color, size=12):
 def build():
     with plt.rc_context({"font.family": "DejaVu Serif", "figure.facecolor": "white"}):
         fig, ax = plt.subplots(figsize=(8, 10.8))
-        ax.set(xlim=(0, 1), ylim=(0, 1)); ax.axis("off")
+        # Include the rounded-box padding below END within the drawing bounds.
+        ax.set(xlim=(0, 1), ylim=(-.02, 1)); ax.axis("off")
         ax.text(.5, .97, "PSEi Profit-Aware GRU Experimental Workflow", ha="center", weight="bold", fontsize=14)
         rows = [
             ("START", "#e0f0e9"),
