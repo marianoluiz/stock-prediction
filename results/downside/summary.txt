@@ -1,0 +1,15 @@
+Four-fold matched CPU downside-loss ablation; lambda=0.7, seed=42.
+Positive kappa selected from validation only; gamma=kappa/std(training returns).
+                                  model  additive_return  geometric_return  sharpe_like  downside_lpm2  downside_deviation_daily  negative_return_sum  loss_day_share     rmse  directional_accuracy  turnover  cost_sum  mean_position  mean_abs_position  near_flat_share  short_share  sign_switches  constant_side  max_drawdown  worst_net_day
+                           profit-aware         0.010945          0.009688     0.272885   8.490337e-06                  0.002885             0.244462        0.494546 0.012030              0.507046  0.003016  0.001836      -0.383190           0.383190         0.000000         1.00            0.0            1.0     -0.057791      -0.014255
+         profit-aware-validation-static         0.011152          0.009892     0.277128   8.539388e-06                  0.002893             0.244959        0.494546 0.012038              0.507046  0.002437  0.001521      -0.384086           0.384086         0.000000         1.00            0.0            1.0     -0.057853      -0.014314
+                  profit-aware-downside         0.000159          0.000129     0.128550   2.208498e-07                  0.000390             0.032290        0.497731 0.010838              0.505454  0.000807  0.000442      -0.001941           0.048616         0.098726         0.75            0.0            1.0     -0.007969      -0.002048
+profit-aware-downside-validation-static         0.000253          0.000225     0.161324   2.074623e-07                  0.000381             0.031463        0.496139 0.010838              0.505454  0.000302  0.000166      -0.002857           0.047568         0.000000         0.75            0.0            1.0     -0.007710      -0.002067
+                                   cash         0.000000          0.000000     0.000000   0.000000e+00                  0.000000             0.000000        0.000000 0.010817              0.000000  0.000000  0.000000       0.000000           0.000000         1.000000         0.00            0.0            0.0      0.000000       0.000000
+
+            outcome   n  mean_difference   ci95_lo   ci95_hi     hac_t  p_two_sided
+   daily_net_return 631        -0.000068 -0.000356  0.000220 -0.466052 6.413396e-01
+daily_downside_lpm2 631        -0.000008 -0.000010 -0.000006 -7.939105 9.366746e-15
+
+Fold means are descriptive; daily HAC tests use 631 paired days, not 631 independent folds.
+Static controls use validation mean position. Cash returns are exactly zero before financing costs.

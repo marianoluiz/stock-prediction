@@ -73,6 +73,10 @@ def build(output_dir: Path, csv_path: Path):
     })
     for lam in lambda_values:
         table[f"profit_aware_loss_lambda_{lam:g}"] = losses[lam]
+    downside = np.maximum(-net_return, 0.0) ** 2
+    table["downside_lpm2_one_observation"] = downside
+    table["downside_gamma_illustration"] = alpha
+    table["profit_aware_downside_loss"] = losses[MAIN_LAMBDA] + alpha * downside
     table.to_csv(ROOT / "loss_curve_values.csv", index=False)
 
     plt.rcParams.update({
@@ -127,7 +131,7 @@ def build(output_dir: Path, csv_path: Path):
     ax.set_xlim(x_pct[0], x_pct[-1])
     ax.set_xlabel("Hypothetical next-day return forecast (%)")
     ax.set_ylabel("Profit-aware loss × 10⁴")
-    ax.set_title("Figure 1.3  Effect of λ on the one-step profit-aware loss", pad=22,
+    ax.set_title("Supplementary illustration: effect of λ on the profit-aware loss", pad=22,
                  weight="bold", color="#17324F")
     ax.text(0.5, 1.01, f"Same {example_date} PSEi return, tanh scale, and asymmetric cost rule",
             transform=ax.transAxes, ha="center", color="#46525E")
@@ -137,6 +141,29 @@ def build(output_dir: Path, csv_path: Path):
              "Alpha uses 252 prior returns. These loss curves do not show trained-model outcomes.",
              ha="center", fontsize=9, color="#53606B")
     fig.subplots_adjust(left=0.12, right=0.97, top=0.81, bottom=0.19)
+    fig.savefig(ROOT / "supplementary_lambda_loss.png", dpi=300)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.8))
+    axes[0].plot(net_return * 100, downside * 1e4, color="#17577b", linewidth=2)
+    axes[0].set_xlabel("Simulated one-day net return (%)")
+    axes[0].set_ylabel("Squared negative return × 10⁴")
+    axes[0].set_title("Zero-target downside penalty", fontsize=11)
+    axes[1].plot(x_pct, losses[MAIN_LAMBDA] * scale, label="Profit-aware, γ = 0", color="#697b8a")
+    axes[1].plot(x_pct, (losses[MAIN_LAMBDA] + alpha * downside) * scale,
+                 label="Profit-aware + downside, γ = α", color="#17577b")
+    axes[1].set_xlabel("Hypothetical next-day return forecast (%)")
+    axes[1].set_ylabel("Combined loss × 10⁴")
+    axes[1].set_title("Same observation and λ = 0.7", fontsize=11)
+    axes[1].legend(fontsize=8, frameon=False)
+    for ax in axes:
+        ax.axhline(0, color="#aaaaaa", linewidth=0.5)
+        ax.grid(alpha=0.2)
+    fig.suptitle("Figure 1.3  Adding a downside-loss mechanism", fontweight="bold", fontsize=13)
+    fig.text(0.5, 0.02, f"Observed PSEi return {example_date}: {actual_return:+.3%}. "
+             "Hypothetical forecasts; flat start; 252 prior returns set α. No model training.",
+             ha="center", fontsize=8)
+    fig.tight_layout(rect=(0, 0.06, 1, 0.93))
     fig.savefig(ROOT / "figure_1_3.png", dpi=300)
     plt.close(fig)
 

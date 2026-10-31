@@ -25,6 +25,8 @@ from scripts.build_chapter1_loss_figures import build_all as build_chapter_1
 from scripts.cost_comparison import plot as plot_cost_comparison
 from scripts.significance import index_tests, plot as plot_significance
 from scripts.sop2_compare import main as compare_lambdas
+from scripts.downside_compare import report as report_downside
+from scripts.build_architecture_figures import build as build_architecture
 
 SAVED_BENCHMARK = ROOT / "results/benchmark_summary_psei_20261025_203842.csv"
 
@@ -63,6 +65,8 @@ def main(argv: list[str] | None = None) -> None:
     subprocess.run([sys.executable, "benchmark.py", "--from-csv", str(summary_path), "--charts"],
                    cwd=ROOT, check=True)
     compare_lambdas(["--results", str(results)])
+    report_downside(results / "downside")
+    build_architecture()
     tests, unit = index_tests(summary_path)
     tests.to_csv(results / "significance.csv", index=False)
     plot_significance(tests, unit, summary_path.name, results / "significance.png")

@@ -11,14 +11,20 @@ signal_t = tanh(alpha * r_hat_t)                 position in (-1, 1)
 delta_t  = signal_t - signal_{t-1}
 cost_t   = c_buy * max(delta_t, 0) + c_sell * max(-delta_t, 0)
 profit_t = signal_t * r_t - cost_t
-Loss     = -mean(profit_t) + lambda * MSE(r_hat, r)  lambda = 0.7
+Loss_PA  = -mean(profit_t) + lambda * MSE(r_hat, r)  lambda = 0.7
+L_down   = mean(max(0, -profit_t)**2)
+Loss_DR  = Loss_PA + gamma * L_down                    gamma >= 0
 ```
 
 `alpha = 1 / std(train returns)` is calibrated per training window. The MSE
 term penalizes return-prediction error. The saved lambda sweep shows changes
 in forecast scale and exposure; it does not establish that calibration prevents
 constant-side positions or improves simulated returns.
-The original algorithm (Steps 0-11) is in [docs/algorithm.md](docs/algorithm.md).
+SOP 2 adds a zero-target squared-downside penalty as the separately identified
+`profit-aware-downside` condition. Its positive weight is selected on prior
+validation data only; see [the fixed protocol](docs/downside-protocol.md).
+The lambda sweep is retained as supplementary analysis.
+The current algorithm (Steps 0-11) is in [docs/algorithm.md](docs/algorithm.md).
 **The full description of the current system, the evaluation design and the
 latest results is in [docs/system-and-results.md](docs/system-and-results.md)**,
 written as the reference for the thesis write-up.
@@ -101,7 +107,7 @@ One command produces every result and figure:
 
 It runs six steps on the PSEi, in order. The primary experiment uses 50
 epochs, lambda 0.7, buy cost 0.296%, sell cost 0.396%, and seed 42. Step 5
-adds the matched CPU calibration sweep; it takes longer than the primary
+adds the matched CPU downside-loss ablation; it takes longer than the primary
 GPU benchmark. You can also run any step on its own.
 `run_thesis.py --stocks` runs the 29-stock version of steps 1-3 instead.
 
@@ -111,7 +117,7 @@ GPU benchmark. You can also run any step on its own.
 | 2 | `scripts/significance.py` | `significance.csv` and `significance.png`: daily paired test of profit-aware minus MSE (Newey-West standard errors, ~630 test days), hit rate vs 50%, and a fold-level sign test. With a `--stocks` CSV it runs the paired t-test across the 29 stocks instead. |
 | 3 | `scripts/cost_comparison.py --walk-forward --folds 4` | `cost_comparison.csv`, `cost_comparison_summary.txt` and `cost_comparison.png`: MSE, profit-aware without cost in the loss, and profit-aware with cost in the loss, each scored without and with cost, on the same 4 folds. |
 | 4 | `main.py --compare --trade-log --symbol PSE:PSEI` | Worked example on the single 70/15/15 split. The `mse/` and `profit_aware/` folders get the model weights plus loss and profit curves, and the full trade log is printed. |
-| 5 | `scripts/sop2_compare.py --train` | Five matched CPU runs at lambda 0, 0.3, 0.7, 1 and 2. Saves each fold/daily CSV and summary, then `sop2_lambda_comparison.csv`, `sop2_lambda_summary.csv`, `sop2_lambda_comparison_summary.txt` and `sop2_lambda_sensitivity.png`. |
+| 5 | `scripts/downside_compare.py --train` | Matched gamma=0 profit-aware control and validation-selected downside model. Saves `results/downside/{manifest.json,validation.csv,history.csv,folds.csv,daily.csv,summary.csv,significance.csv,downside_comparison.png}`. All four folds use CPU, lambda .7 and seed 42. |
 | 6 | `scripts/build_paper_figures.py --latest` | Replots the latest PSEi benchmark, significance and cost charts, refreshes SOP 2 tables, and generates the four Chapter 1 figures and their numerical curve data in `results/chapter1/`. |
 
 
@@ -153,14 +159,14 @@ own timestamp. `--figures-only` uses the committed reference run;
 |---|---|
 | 1.1, MSE equation | `results/chapter1/figure_1_1.png` |
 | 1.2, MSE versus profit-aware loss | `results/chapter1/figure_1_2.png` |
-| 1.3, effect of calibration weight | `results/chapter1/figure_1_3.png` |
+| 1.3, downside-loss mechanism | `results/chapter1/figure_1_3.png` |
 | 1.4, original transaction-cost illustration | `results/chapter1/figure_1_4.png` |
 | 3.1, workflow diagram | `docs/figure_3_1.png` |
 | 3.2, input-process-output diagram | `docs/figure_3_2.png` |
 | 4.1, per-fold return difference | `<benchmark>_charts/per_fold_geo_diff.png` |
 | 4.2, trading-strategy comparison | `<benchmark>_charts/strategy_comparison.png` |
-| 4.3, lambda sensitivity | `results/sop2_lambda_sensitivity.png` |
-| 4.4, significance | `results/significance.png` |
+| 4.3, principal profit-aware versus MSE significance | `results/significance.png` |
+| 4.4, downside-loss ablation | `results/downside/downside_comparison.png` |
 | 4.5, cost comparison | `results/cost_comparison.png` |
 
 Chapter 1 figures are illustrations, not model results. Figures 1.2 and 1.3
@@ -170,18 +176,28 @@ and all 1,601 forecast-grid values are reproducible in
 `scripts/build_chapter1_loss_figures.py` and `results/chapter1/loss_curve_values.csv`.
 The source data checksum is checked before plotting. Figure 1.4 retains the
 group's synthetic seed-42, fixed 0.5-unit cost example; it is not a backtest
-of the current asymmetric cost model. Chapter 3 diagrams are retained static
-assets in `docs/`, rather than diagrams regenerated from experiment data.
+of the current asymmetric cost model. Chapter 3 diagrams are rebuilt by `scripts/build_architecture_figures.py`;
+they describe the procedure rather than experimental results. The old lambda
+loss illustration is saved as `results/chapter1/supplementary_lambda_loss.png`.
 
 | Numerical table | Source/output |
 |---|---|
 | Fold results, GRU comparisons and trading-strategy metrics | `<benchmark>.csv` and `<benchmark>_summary.txt` |
 | Test dates, positions and daily net returns | `<benchmark>_daily.csv` |
-| Lambda comparison by fold and means across folds | `results/sop2_lambda_comparison.csv` and `results/sop2_lambda_summary.csv` |
+| Supplementary lambda comparison by fold and means across folds | `results/sop2_lambda_comparison.csv` and `results/sop2_lambda_summary.csv` |
 | Paired tests and confidence intervals | `results/significance.csv` |
+| Downside means, selected weights and paired uncertainty (Tables 4.6–4.8) | `results/downside/summary.csv`, `folds.csv`, `validation.csv`, `significance.csv` |
 | With/without-cost experiment | `results/cost_comparison.csv` and `results/cost_comparison_summary.txt` |
 
-Run SOP 2 locally with `.venv/Scripts/python.exe scripts/sop2_compare.py --train`.
+Run SOP 2 locally with `.venv/Scripts/python.exe scripts/downside_compare.py --train`.
+Omit `--train` to rebuild its summary and chart from saved numerical outputs.
+The downside weight is `gamma=kappa/std(training returns)`, with positive kappa
+selected from {.25, 1, 4} using a fixed common validation utility. Cash and
+validation-fixed constant exposures diagnose trivial low-exposure solutions.
+Historical SOP 1 and 3 results remain separate and are not attributed to this extension.
+
+The following describes the **supplementary** lambda sweep, which can still run
+with `.venv/Scripts/python.exe scripts/sop2_compare.py --train`.
 This experiment and its Chapter 4–5 analysis are separate from the optional
 Chapter 1 notebook. To recompute its
 tables and chart from saved daily/fold CSVs, omit `--train`. This validates
@@ -251,7 +267,8 @@ argument and its default is listed in [docs/arguments.md](docs/arguments.md).
 │   ├── significance.py       # Profit-aware minus MSE significance tests
 │   ├── cost_comparison.py    # With-cost vs without-cost comparison
 │   ├── plot_loss_comparison.py  # Benchmark comparison figures
-│   ├── sop2_compare.py       # Matched calibration sweep and its tables/chart
+│   ├── sop2_compare.py       # Supplementary historical lambda sweep
+│   ├── downside_compare.py   # SOP 2 downside ablation, validation selection and chart
 │   ├── build_chapter1_loss_figures.py  # Observed-return loss illustrations
 │   ├── build_paper_figures.py # Rebuild all saved-result plots and tables locally
 │   └── Chapter_1_Figures_Colab.ipynb  # Optional Chapter 1 illustrations only

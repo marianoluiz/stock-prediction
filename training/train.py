@@ -35,6 +35,7 @@ class TrainingConfig:
     loss_type: str = "profit-aware"
     alpha: float = 1.0
     loss_lambda: float = 0.7
+    downside_gamma: float = 0.0
     buy_cost_rate: float = PH_BUY_COST
     sell_cost_rate: float = PH_SELL_COST
     learning_rate: float = 1e-3
@@ -64,6 +65,7 @@ def run_epoch(
     device: torch.device,
     loss_type: str = "profit-aware",
     loss_lambda: float = 1.0,
+    downside_gamma: float = 0.0,
     ) -> Dict[str, float]:
     """Run one training or evaluation epoch.
 
@@ -75,8 +77,8 @@ def run_epoch(
         buy_cost_rate:  Fractional cost per unit of position increase (purchase).
         sell_cost_rate: Fractional cost per unit of position decrease (sale).
         device: Target device for tensors.
-        loss_type: ``"mse"`` for baseline, or ``"profit-aware"`` for the
-            additive P&L loss.
+        loss_type: ``"mse"``, ``"profit-aware"``, or
+            ``"profit-aware-downside"`` for the downside extension.
         loss_lambda: Weight of the MSE calibration term added to the custom
             profit-aware loss (ignored when ``loss_type == "mse"``).
 
@@ -84,6 +86,10 @@ def run_epoch(
         Dictionary of aggregated metrics: ``loss``, ``directional_acc``,
         ``cum_profit``, ``sharpe_like``, ``mse``, ``mae`` and ``rmse``.
     """
+    if loss_type not in {"mse", "profit-aware", "profit-aware-downside"}:
+        raise ValueError(f"Unknown loss_type: {loss_type}")
+    if downside_gamma < 0 or (loss_type != "profit-aware-downside" and downside_gamma != 0):
+        raise ValueError("A nonnegative gamma belongs only to profit-aware-downside")
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
 
@@ -110,6 +116,7 @@ def run_epoch(
                     buy_cost_rate=buy_cost_rate,
                     sell_cost_rate=sell_cost_rate,
                     previous_signal=previous_signal,
+                    downside_gamma=downside_gamma,
                 )
                 loss = profit_loss + loss_lambda * F.mse_loss(pred, y_batch)
 
@@ -216,6 +223,7 @@ def fit(
             device,
             loss_type=config.loss_type,
             loss_lambda=config.loss_lambda,
+            downside_gamma=config.downside_gamma,
         )
         val_metrics = run_epoch(
             model,
@@ -227,6 +235,7 @@ def fit(
             device,
             loss_type=config.loss_type,
             loss_lambda=config.loss_lambda,
+            downside_gamma=config.downside_gamma,
         )
 
         history["train_loss"].append(train_metrics["loss"])

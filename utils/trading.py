@@ -32,10 +32,9 @@ def smooth_signal(predicted_return: torch.Tensor, alpha: float) -> torch.Tensor:
     """Continuous trading position: ``tanh(alpha * predicted_return)``.
 
     Unlike the old straight-through ``sign`` hack, forward and backward use the
-    *same* smooth function, so gradients remain alive for every ``|r|`` (no
-    saturation) and there is no fake forward/backward coupling to maintain.
-    The output is a position size in ``(-1, 1)``, where magnitude scales how
-    confident we are and sign is the direction.
+    *same* smooth function. Gradients can still become very small when tanh
+    saturates. Magnitude is simulated exposure, not a calibrated confidence
+    probability; sign is the direction.
     """
     return torch.tanh(alpha * predicted_return)
 
@@ -132,15 +131,32 @@ def profit_aware_loss(
     buy_cost_rate: float = PH_BUY_COST,
     sell_cost_rate: float = PH_SELL_COST,
     previous_signal: torch.Tensor | float | None = None,
+    downside_gamma: float = 0.0,
 ) -> torch.Tensor:
     """Loss = -mean(pos_t * return_t - cost_t) over a smooth tanh position.
 
     ``pos = tanh(alpha * r_hat)`` is a continuous position size in (-1, 1), so
-    gradients flow for every prediction magnitude (no saturation). Transaction
+    gradients use the same smooth mapping as evaluation. Transaction
     costs apply to any position change, including fractional sizing changes,
     at the buy rate for increases and the sell rate for decreases.
     """
 
     pos = smooth_signal(predicted_return, alpha)
     profit = profit_per_step(pos, actual_return, previous_signal, buy_cost_rate, sell_cost_rate)
-    return -profit.mean()
+    loss = -profit.mean()
+    # Preserve the original loss exactly when the extension is disabled.
+    if downside_gamma < 0:
+        raise ValueError("downside_gamma must be nonnegative")
+    if downside_gamma:
+        loss = loss + downside_gamma * downside_second_moment(profit)
+    return loss
+
+
+def downside_second_moment(net_return: torch.Tensor) -> torch.Tensor:
+    """Zero-target lower partial second moment, over ALL observations.
+
+    Positive net returns contribute zero; negative net returns contribute
+    their squared magnitude. ReLU squared is differentiable at zero.
+    Returns use fractional units, so this quantity has squared-return units.
+    """
+    return torch.relu(-net_return).square().mean()

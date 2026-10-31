@@ -1,113 +1,104 @@
----
- 
 ## 3.2.1 Proposed Algorithm
- 
+
+This revision retains Steps 0–11 and the GRU architecture. The learning
+criterion has separate profit, downside-risk and asymmetric-cost components.
+The implementation and fixed experimental controls are in
+[downside-protocol.md](downside-protocol.md).
+
 **Step 0: START**
- 
+
 **Step 1: Historical Stock Data Input and Preprocessing**
- 
-*Given:* $P_t$ historical stock price at time $t$, $X$ historical stock data, $L$ window length
- 
-Collect historical stock market data consisting of Open, High, Low, Close, and Volume values. Missing values are handled, and the data is normalized to ensure consistent scaling. The time-series data is then transformed into sliding-window sequences, where previous observations are used as input for forecasting.
- 
-$$X_t = [X_{t-L}, X_{t-L+1}, \dots, X_{t-1}]$$
- 
+
+Load the fixed TradingView PSEi cache. Build six backward-looking channels:
+simple return; return lags 1, 5 and 10; 20-day volume z-score; 10-day return
+volatility. The saved index volume is zero. Remove unavailable warm-up rows.
+Construct a 30 × 6 window ending before its target return day. Preserve the
+existing four expanding-window training/validation/test partitions.
+
 **Step 2: Market Return Computation**
- 
-*Given:* $P_t$ current stock price, $P_{t+1}$ next stock price
- 
-Compute the actual market return between two consecutive time steps:
- 
-$$return_t = \frac{P_{t+1} - P_t}{P_t}$$
- 
-This return value will be used as the basis for simulated trading profit.
- 
+
+$$r_t = P_t/P_{t-1}-1.$$
+
+The target is the return realized on day t. Its input contains only days
+through t−1. This indexing matches `utils.preprocessing.create_sequences`.
+
 **Step 3: GRU Forecasting Layer**
- 
-*Given:* $X_t$ input sequence, $h_{t-1}$ previous hidden state
- 
-Pass the input sequence into the GRU model to generate the predicted return:
- 
-$$\hat{r}_t = GRU(X_t)$$
- 
-The GRU processes the sequential input through its update and reset gates to capture temporal dependencies in the historical stock data.
- 
-### OBJECTIVE 1 – Profit-Aware Loss Learning
- 
-**Step 4: Direction-Sensitive Trading Signal Generation**
- 
-*Given:* $\hat{r}_t$ predicted return, $\alpha$ scaling factor
- 
-Convert the predicted return into a continuous trading signal using the hyperbolic tangent function:
- 
-$$signal_t = \tanh(\alpha \hat{r}_t)$$
- 
-A positive signal indicates a buy-oriented position, while a negative signal indicates a sell-oriented position. This allows the model output to be interpreted as a trading decision.
- 
-### OBJECTIVE 2 – Direction-Sensitive Trading Signal
- 
-**Step 5: Trading Friction Penalty Computation**
- 
-*Given:* $signal_t$ current trading signal, $signal_{t-1}$ previous trading signal, $c$ transaction cost rate
- 
-Compute the trading friction penalty based on the change in trading position:
- 
-$$cost_t = c\,|signal_t - signal_{t-1}|$$
- 
-This penalty represents practical trading costs such as transaction fees, bid-ask spread, and slippage. The penalty increases when the model frequently changes its trading position.
- 
-### OBJECTIVE 3 – Trading Friction
- 
-**Step 6: Cost-Adjusted Simulated Trading Profit Computation**
- 
-*Given:* $signal_t$ trading signal, $return_t$ actual market return, $cost_t$ trading friction penalty, $\hat{r}_t$ predicted return
- 
-Compute the simulated trading profit after deducting transaction cost:
- 
-$$profit_t = signal_t \times return_t - cost_t$$
- 
-This step allows the enhanced GRU to measure financial usefulness based on cost-adjusted simulated profit instead of prediction error alone.
- 
-In addition, define the MSE calibration term:
- 
-$$MSE_t = (\hat{r}_t - return_t)^2$$
- 
-This term penalizes deviation of the predicted return from the actual market return, keeping predictions near realistic magnitudes and preventing gradient saturation.
- 
-### OBJECTIVE 3 – Trading Friction
- 
-**Step 7: Profit-Aware Loss Calculation**
- 
-*Given:* $profit_t$ cost-adjusted simulated trading profit, $MSE_t$ MSE calibration term, $N$ number of samples, $\lambda$ calibration weight (default $\lambda = 0.1$)
- 
-The training loss is computed as the negative mean of cost-adjusted simulated trading profit, combined with the MSE calibration term:
- 
-$$Loss = -\frac{1}{N}\sum_{t=1}^{N} profit_t \;+\; \lambda \cdot \frac{1}{N}\sum_{t=1}^{N} MSE_t$$
- 
-By minimizing this loss, the enhanced GRU is trained to maximize simulated trading profit while accounting for trading friction. The calibration weight $\lambda$ is fixed at $0.1$, balancing the profit-aware objective against the MSE regularization term.
- 
-### OBJECTIVE 1 – Profit-Aware Loss Learning
- 
+
+Initialize with seed 42. Use the unchanged two-layer GRU with 64 hidden units,
+dropout .2, final-state LayerNorm and a linear output head. The output is
+bounded by five training-target standard deviations:
+
+$$\hat r_t = 5\sigma_{train}\tanh(q_t).$$
+
+**Step 4: Differentiable Continuous-Position Generation**
+
+$$s_t=\tanh(\alpha\hat r_t),\qquad \alpha=1/\sigma_{train}.$$
+
+Both GRUs use this mapping during financial evaluation. It is a synthetic
+position in (−1,1), not a calibrated confidence probability. The same smooth
+function supplies forward and backward computations; its gradient can become
+small near saturation. No straight-through sign or direction-mismatch loss.
+
+**Step 5: Asymmetric Position-Change Cost Computation — OBJECTIVE 3**
+
+$$\Delta s_t=s_t-s_{t-1},$$
+$$C_t=.00296\max(\Delta s_t,0)+.00396\max(-\Delta s_t,0).$$
+
+Use the shared `utils.trading.position_change_cost`. Each evaluation window
+starts flat; there is no forced terminal liquidation. Carry the last position
+between chronological batches, detached from the previous computation graph.
+Cost inclusion versus omission during profit-aware training is the Objective
+Three ablation. Both conditions are scored with the same evaluation costs.
+
+**Step 6: Simulated Net Return, Calibration and Downside Quantities**
+
+$$n_t=s_tr_t-C_t,\qquad MSE_t=(\hat r_t-r_t)^2,$$
+$$d_t=\max(0,-n_t)^2.$$
+
+The zero-target downside quantity is zero on nonnegative days. All batch
+observations enter its mean; it is not an average restricted to losing days.
+
+**Step 7: Financial Loss Calculation — OBJECTIVES 1 AND 2**
+
+$$L_{PA}=-\operatorname{mean}(n_t)+.7\operatorname{mean}(MSE_t),$$
+$$L_{DR}=L_{PA}+\gamma\operatorname{mean}(d_t).$$
+
+**Objective 1:** the negative mean net-return term gives simulated financial
+outcomes a direct role in learning. Its base profit-aware model (gamma=0) is
+compared with the MSE-only baseline.
+
+**Objective 2:** the additional gamma-weighted squared-negative-net-return term
+introduces downside-loss awareness. Compare gamma=0 with the selected positive
+gamma while retaining lambda=.7, costs and the forecasting architecture.
+Gamma=0 exactly reproduces the base loss; it does not modify MSE training.
+
+For Objective 3, both cost-ablation models retain gamma=0. The fixed cost
+coefficients are not the treatment; cost inclusion inside training is.
+
 **Step 8: Backpropagation and Parameter Update**
- 
-*Given:* $Loss$ profit-aware loss
- 
-Compute the gradients of the loss with respect to the GRU model parameters and update the parameters using an optimizer.
- 
-$$\theta = \theta - \eta \nabla_\theta Loss$$
- 
-where $\theta$ represents the model parameters and $\eta$ represents the learning rate.
- 
-### OBJECTIVE 1 – Profit-Aware Loss Learning
- 
-**Step 9: Iteration**
- 
-Repeat Steps 3 to 8 for all batches and epochs until training is complete.
- 
-**Step 10: Output**
- 
-Return the trained enhanced GRU forecasting model.
- 
+
+Backpropagate the condition-specific loss through the GRU, output head,
+position map and financial terms. Use the existing AdamW learning rate .001,
+weight decay .001, batch size 64 and chronological batches. ReLU squared has
+derivative zero at zero; the existing cost function is subdifferentiable.
+
+**Step 9: Iteration and Prior-Validation Selection**
+
+Train for 50 epochs, keeping final-epoch weights. For the new downside
+experiment only, train the gamma=0 control and kappa in {.25,1,4}, with
+gamma=kappa/sigma_train. Select a positive candidate by the common prior
+validation utility `mean(net) − .7*MSE − alpha*mean(downside_squared)`.
+The reference coefficient is alpha for every candidate; smaller kappa breaks
+exact ties. Save the choice before test evaluation. Do not select weights,
+epochs or checkpoints using held-out return. There is no refit on validation.
+
+**Step 10: Output and Held-Out Evaluation**
+
+Save forecasts, realized returns, positions, cost and net return. Report
+forecast diagnostics, net additive/geometric return, Sharpe-like ratio,
+zero-target downside loss/deviation, turnover and exposure by fold. Compare
+cash and validation-fixed static positions in the new downside ablation.
+Run separate paired uncertainty analyses for the principal comparison and
+the downside comparison. Retain the historical lambda sweep as supplementary.
+
 **Step 11: END**
- 
----

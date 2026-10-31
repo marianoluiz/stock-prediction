@@ -1,7 +1,7 @@
 # Profit-aware GRU on the PSEi: system, evaluation design and results
 
 This document is the reference for the thesis write-up. It describes what the
-code does now (October 2026), how the model is tested, and what the latest
+code does now (November 2026), how the model is tested, and what the latest
 run found. When this document and the code disagree, the code is right.
 Please report the mismatch so this document can be fixed.
 
@@ -25,7 +25,7 @@ Contents:
 
 ## 1. What the study compares
 
-Two GRU models are trained to forecast the **next-day return of the PSEi
+The principal comparison retains two GRU models forecasting the **next-day return of the PSEi
 index** (`PSE:PSEI`). They are identical in every respect except the training
 objective:
 
@@ -44,7 +44,7 @@ The three thesis objectives map onto the code as follows:
 | Objective | Where it lives |
 |---|---|
 | 1. Profit-aware loss learning | `utils/trading.py::profit_aware_loss`, used in `training/train.py::run_epoch` |
-| 2. Direction-sensitive trading signal | `utils/trading.py::smooth_signal`: position = `tanh(alpha × predicted return)` |
+| 2. Downside-risk-aware loss learning | `utils/trading.py::downside_second_moment`, optional gamma in `profit_aware_loss`, and `scripts/downside_compare.py` for matched validation-selected testing |
 | 3. Trading friction (realistic costs) | `utils/trading.py::position_change_cost`: asymmetric PSE buy/sell costs, charged on every position change, in the loss **and** in every evaluation |
 
 ---
@@ -134,7 +134,7 @@ figure can join them end to end.
 
 **Why walk-forward and not a single split?** One symbol with one test window
 gives exactly one number, and one window is one market regime, which could
-easily be luck. Four windows give four independent out-of-time results and
+easily be luck. Four windows give four nonoverlapping out-of-time results and
 test whether the result holds across regimes. Four folds (about 7.5 months
 each) was chosen over six (about 5 months each) because shorter windows make
 returns and Sharpe ratios too noisy.
@@ -191,12 +191,11 @@ input  [batch, 30 days, 6 features]
 | Trainable parameters | 38,977 |
 | Output bound | `output_scale = 5 / alpha` = 5 standard deviations of the training returns (about ±6.6% per day for the PSEi) |
 
-The bounded output head (`output_scale × tanh`) is a safeguard. Without it,
-the profit-aware loss can push the raw prediction towards ±infinity, because
-a larger prediction makes the position more confident, until `tanh`
-saturates and training stops learning. Bounding the prediction to a realistic
-range prevents that runaway. The MSE term in the loss (Section 6) does the
-same job from the loss side.
+The bounded output head (`output_scale × tanh`) constrains forecast magnitude.
+The position magnitude is simulated exposure, not calibrated confidence.
+Neither the cap nor MSE calibration guarantees nonsaturated gradients or
+varying direction; `tanh` can still saturate within the cap. The position
+diagnostics are therefore necessary.
 
 ---
 
@@ -268,11 +267,11 @@ L_PA = − mean( profit_t )  +  lambda × mean( (r̂_t − r_t)^2 ),      lambda
 - The first term rewards the model for **net profit after costs**. Because
   the cost term depends on `pos_t − pos_{t−1}`, the model is penalised for
   flipping its position too often (Objective 3).
-- The second term (the "MSE calibration term") keeps predictions close to
-  the real return scale. Without it (`lambda = 0`), the profit term alone
-  pushes predictions to extreme values, `tanh` saturates at ±1, the gradient
-  vanishes, and the model freezes as a constant always-long or always-short
-  bet. This was observed and is why `lambda = 0.7` is the default.
+- The second term penalizes return-prediction error. The supplementary
+  matched lambda sweep shows smaller forecast magnitudes and exposure at
+  stronger calibration, but all five tested weights retained one market side
+  within each fold. The inherited .7 setting is a control, not an optimal
+  weight demonstrated by that test sweep. The new downside term is separate.
 - `tanh` is used in both the forward and the backward pass (no
   straight-through `sign()` trick). Some older docs (`docs/profit-loss-saturation.md`,
   `docs/plan-directional-smooth.md`) describe a straight-through estimator
@@ -520,9 +519,11 @@ entire test window. The printed trade log's "Signal" column shows only the
    +3.8% vs −1.3% over the whole period). But it did this by holding a
    **constant short position**, not by forecasting, and the difference is not
    statistically significant (p = 0.53).
-2. **Objective 2 (direction-sensitive signal).** The `tanh` position is
-   implemented and differentiable. Directional accuracy (50.7% vs 49.6%) is
-   **not distinguishable from 50%** for either model.
+2. **Objective 2 (downside-risk-aware learning).** The additional zero-target
+   squared-negative-net-return term is implemented. The matched CPU control,
+   validation scores, selected weights, held-out downside risk, exposure and
+   uncertainty are in `results/downside/`. Use these outputs for this objective;
+   neither old directional results nor lambda-sweep results answer this ablation.
 3. **Objective 3 (trading friction).** The cost term clearly does its job as a
    turnover penalty. Without it, the same loss trades 8× more and loses money
    after PSE costs. With it, cost drag falls from 1.36 pp to 0.18 pp, and it
@@ -543,7 +544,7 @@ entire test window. The printed trade log's "Signal" column shows only the
   between 2024 and 2026, a period when the index mostly fell. A constant short
   wins in that environment. Results can't be generalised to rising markets
   or to other indices.
-- **Small effective sample.** 631 test days, but only 4 independent model
+- **Small effective sample.** 631 test days, but only 4 separately fitted model
   fits. The fold-level test can't reach significance even at 4/4.
 - **Degenerate models.** Both models hold one direction for every test
   window (Section 9.4). Profit numbers therefore reflect market drift times
@@ -574,9 +575,9 @@ entire test window. The printed trade log's "Signal" column shows only the
 .venv/Scripts/python.exe run_thesis.py
 ```
 
-This runs the four steps below, with every default (50 epochs, lambda 0.7,
-PSE costs, seed 42, 4 folds), in about 5 minutes on the GPU. Each step can
-also be run on its own:
+This runs the six steps below with 50 epochs, lambda .7, PSE costs, seed 42
+and four folds. The downside ablation runs matched CPU conditions and adds
+training time. Each step can also run on its own:
 
 | Step | Command | Output in `results/` |
 |---|---|---|
@@ -584,6 +585,8 @@ also be run on its own:
 | 2 | `scripts/significance.py` | `significance.csv`, `significance.png` |
 | 3 | `scripts/cost_comparison.py --walk-forward --folds 4` | `cost_comparison.csv`, `cost_comparison_summary.txt`, `cost_comparison.png` |
 | 4 | `main.py --compare --trade-log --symbol PSE:PSEI` | `mse/` and `profit_aware/`: weights, loss and profit curves on the single split; the trade log is printed to the console |
+| 5 | `scripts/downside_compare.py --train` | `downside/`: selection manifest, validation scores, fold/daily results, summary, paired tests and chart |
+| 6 | `scripts/build_paper_figures.py --latest` | Chapter 1 and 3 diagrams; saved-result Chapter 4 figures and tables, including supplementary lambda outputs |
 
 Figures in `..._charts/`:
 
@@ -655,3 +658,34 @@ and loss.
 | `utils/baselines.py` | SMA, RSI and MACD strategies (Section 8.2) |
 | `docs/algorithm.md` | The original thesis algorithm, Steps 0-11 |
 | `docs/arguments.md` | Every command-line argument and its default |
+
+## November 2026: downside-loss extension (SOP 2)
+
+The original principal benchmark and cost ablation above evaluate the base
+profit-aware objective at gamma=0. Their numerical results do not describe the
+new extension. The historical lambda experiment is supplementary.
+
+The new loss is `L_PA + gamma*mean(relu(-net_return)**2)` with lambda .7,
+the unchanged continuous positions and the shared asymmetric cost rule.
+The fixed protocol, scale convention, positive candidate set, common
+validation utility and held-out reporting rules are in
+[downside-protocol.md](downside-protocol.md). It selects a weight per fold
+before test evaluation and never selects on test return. Run
+`scripts/downside_compare.py --train`; omit `--train` for saved-result reporting.
+All new comparisons use matched CPU runs. Lower downside must be considered
+alongside net return, exposure, turnover, cash and validation-static controls.
+The risk term is a new mechanism in this implementation, not a claim that
+lower partial moments or cost-aware learning are newly invented theories.
+
+The actual matched CPU run selected kappa 1, .25, .25 and .25 for folds 0–3.
+Arithmetic fold means, control versus downside: daily downside deviation
+.2885% versus .0390%, mean absolute position .3832 versus .0486, geometric
+return +.9688% versus +.0129%, and Sharpe-like ratio .2729 versus .1286.
+All four folds remained on one market side; the downside model was short in
+three and long in one. The paired daily squared-negative-net-return change
+was lower (exploratory HAC p<.001); the net-return difference was uncertain
+(p=.641). Validation-static controls produced similar geometric outcomes
+(+.9892% and +.0225%), so the result supports a lower-exposure risk–return
+tradeoff, not an improvement in timing or profitability. Full precision,
+all fold outcomes, validation scores and the selection manifest are retained
+in `results/downside/`.

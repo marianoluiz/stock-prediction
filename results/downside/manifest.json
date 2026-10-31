@@ -1,0 +1,71 @@
+{
+  "protocol": "downside-v1",
+  "cache_sha256": "35bb13112fc537d62697042bb7dd27803816f51254cadad2822ed0e5913d4972",
+  "kappas": [
+    0.25,
+    1.0,
+    4.0
+  ],
+  "lambda": 0.7,
+  "gamma_rule": "kappa / std(y_train), ddof=0",
+  "selection": "max common validation utility with reference kappa=1; smallest kappa ties",
+  "epochs": 50,
+  "seed": 42,
+  "device": "cpu",
+  "threads": 4,
+  "torch": "2.12.0+cpu",
+  "numpy": "2.4.6",
+  "python": "3.12.14",
+  "buy_cost": 0.00296,
+  "sell_cost": 0.00396,
+  "folds": [
+    {
+      "fold": 0,
+      "alpha": 72.43523020074578,
+      "selected_kappa": 1.0,
+      "selected_gamma": 72.43523020074578,
+      "train_n": 1250,
+      "val_n": 221,
+      "test_n": 157,
+      "validation_end": "2024-03-22",
+      "test_start": "2024-03-25",
+      "test_end": "2024-11-13"
+    },
+    {
+      "fold": 1,
+      "alpha": 74.67882290673404,
+      "selected_kappa": 0.25,
+      "selected_gamma": 18.66970572668351,
+      "train_n": 1383,
+      "val_n": 245,
+      "test_n": 157,
+      "validation_end": "2024-11-13",
+      "test_start": "2024-11-14",
+      "test_end": "2025-07-10"
+    },
+    {
+      "fold": 2,
+      "alpha": 76.71906852945914,
+      "selected_kappa": 0.25,
+      "selected_gamma": 19.179767132364784,
+      "train_n": 1517,
+      "val_n": 268,
+      "test_n": 157,
+      "validation_end": "2025-07-10",
+      "test_start": "2025-07-11",
+      "test_end": "2026-03-02"
+    },
+    {
+      "fold": 3,
+      "alpha": 77.8161469643862,
+      "selected_kappa": 0.25,
+      "selected_gamma": 19.45403674109655,
+      "train_n": 1650,
+      "val_n": 292,
+      "test_n": 160,
+      "validation_end": "2026-03-02",
+      "test_start": "2026-03-03",
+      "test_end": "2026-10-23"
+    }
+  ]
+}

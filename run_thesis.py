@@ -12,8 +12,8 @@ The study's primary series is the PSEi index (PSE:PSEI). Runs, in order:
                                  same folds
   4. main.py --compare           one worked example (PSE:PSEI, single 70/15/15
                                  split): loss/profit curves and a full trade log
-  5. scripts/sop2_compare.py --train
-                                 matched CPU sweep of lambda 0, 0.3, 0.7, 1, 2
+  5. scripts/downside_compare.py --train
+                                 matched CPU downside-loss ablation, validation-only gamma selection
   6. scripts/build_paper_figures.py --latest
                                  Chapter 1 figures and all saved-result charts/tables
 
@@ -23,7 +23,7 @@ study did before it was narrowed to the index.
 
 Outputs land in results/ (see README.md, "Thesis run"). Training uses 50
 epochs, buy cost 0.296%, sell cost 0.396%, and seed 42. Lambda is 0.7 in
-the primary experiment; step 5 varies it across the five specified weights.
+the primary experiment and the downside ablation. The historical lambda sweep is supplementary.
 
 Usage:
     .venv/Scripts/python.exe run_thesis.py
@@ -48,7 +48,7 @@ STEPS = [
     ("Significance test", ["scripts/significance.py"]),
     ("Cost comparison", ["scripts/cost_comparison.py", *WALK_FORWARD]),
     ("Worked example (PSE:PSEI)", ["main.py", "--compare", "--trade-log", "--symbol", "PSE:PSEI"]),
-    ("SOP 2 calibration sweep (CPU)", ["scripts/sop2_compare.py", "--train"]),
+    ("SOP 2 downside-loss ablation (CPU)", ["scripts/downside_compare.py", "--train"]),
     ("Rebuild figures and tables", ["scripts/build_paper_figures.py", "--latest"]),
 ]
 STOCK_STEPS = [
