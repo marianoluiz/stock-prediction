@@ -30,7 +30,7 @@ def build():
             ("Evaluate held-out return, downside risk, forecast error,\nturnover and exposure; compare constant controls", "#e4f1e6"),
             ("Save aligned daily outputs, fold tables and figures", "#e4f1e6"),
             ("END", "#e0f0e9")]
-        ys = [.87, .77, .66, .55, .43, .30, .18, .08, -.005]
+        ys = [.87, .77, .66, .55, .43, .30, .18, .08, .005]
         hs = [.05, .07, .07, .07, .09, .09, .07, .05, .045]
         for i, ((text, color), y, h) in enumerate(zip(rows, ys, hs)):
             box(ax, .08, y, .84, h, text, color, 12)
